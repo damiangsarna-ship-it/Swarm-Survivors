@@ -124,6 +124,46 @@ button:active { transform:scale(0.95); }
  
 /* --- Additional small style fallbacks for old UI --- */ 
 .weaponSlots, .passiveSlots{ display:none; } /* keep hidden (we update DOM bars instead) */ 
+
+/* --- CONSOLE STYLES --- */
+#console {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 50%;
+    height: 300px;
+    background: rgba(20, 20, 20, 0.8);
+    border-top: 2px solid #333;
+    display: none;
+    flex-direction: column;
+    font-family: monospace;
+    color: #eee;
+    z-index: 200;
+    pointer-events: auto;
+}
+#consoleOutput {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+#consoleInput {
+    border: none;
+    background: #111;
+    padding: 10px;
+    color: #eee;
+    font-family: monospace;
+    font-size: 14px;
+    outline: none;
+    border-top: 2px solid #333;
+}
+.log-error { color: #ff6b6b; }
+.log-success { color: #6bff94; }
+.log-info { color: #6b94ff; }
+.autocomplete-suggestion {
+    color: #888;
+}
  
 </style> 
 </head> 
@@ -131,7 +171,14 @@ button:active { transform:scale(0.95); }
  
 <canvas id="gameCanvas"></canvas> 
  
-<div id="uiLayer"> 
+<div id="uiLayer">
+    <div id="console">
+        <div id="consoleOutput"></div>
+        <div style="position: relative;">
+            <input type="text" id="consoleInput" placeholder="Enter command..." autocomplete="off" />
+            <span id="autocompleteSuggestion" style="position: absolute; left: 10px; top: 10px; color: #555; pointer-events: none;"></span>
+        </div>
+    </div>
   <div id="stats"></div> 
  
   <div class="bar-container hud-element" id="weaponBar"></div> 
@@ -199,7 +246,18 @@ window.addEventListener("keydown",e=>{
     const levelEl = document.getElementById("levelUpScreen"); 
     if(levelEl.style.display === "flex") return; 
     togglePause(); 
-  } 
+  }
+    if (e.key === '`') {
+        e.preventDefault();
+        const consoleEl = document.getElementById('console');
+        const consoleInput = document.getElementById('consoleInput');
+        const isVisible = consoleEl.style.display === 'flex';
+        consoleEl.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            consoleInput.focus();
+        }
+        paused = !isVisible;
+    }
 }); 
 window.addEventListener("keyup",e=>{ 
   if(e.key==="w" || e.key==="ArrowUp") input.up = 0; 
@@ -278,9 +336,9 @@ class Player{
     this.invuln = 0; this.recoveryTimer=1; 
     this.x=0; this.y=0; this.r=12; 
     this.stats={ 
-      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":10,"Area":2, 
-      "Speed":5,"Duration":5,"Amount":0,"Cooldown":10,"Luck":0,"Growth":10,"Greed":0, 
-      "Curse":0,"Magnet":5,"Revival":1 
+      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":0,"Area":1,
+      "Speed":1,"Duration":1,"Amount":0,"Cooldown":0,"Luck":0,"Growth":2500,"Greed":0,
+      "Curse":0,"Magnet":1,"Revival":1
     }; 
     this.hp=this.stats["Max Health"]; 
     this.maxhp=this.stats["Max Health"]; 
@@ -2236,19 +2294,19 @@ function randPickAndRemove(arr){ const idx = Math.floor(Math.random()*arr.length
 function shuffleArray(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; } 
 // ------------------- Enemy types & enemy pool ------------------- 
 const EnemyTypes={ 
-    goblin:{hp:3,dmg:6,armor:1,speed:80,size:12,xpValue:0.9, color: '#8fbc8f'}, 
-    orc:{hp:15,dmg:9,armor:3,speed:60,size:18,xpValue:6.5, color: '#d2691e'},
-    bat:{hp:2,dmg:5,armor:0,speed:120,size:8,xpValue:0.6, color: '#a9a9a9'},
-    skeleton:{hp:9,dmg:10,armor:2,speed:70,size:14,xpValue:5.5, color: '#f5f5dc'},
-    golem:{hp:30,dmg:12,armor:5,speed:40,size:24,xpValue:15, color: '#708090'},
-    ogre_boss:{hp:180,dmg:15,armor:10,speed:50,size:32,xpValue:53, isBoss: true, color: '#dc143c'},
-    sprinter: {hp: 6, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 2.8, color: '#add8e6'},
-    tank: {hp: 80, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 13, color: '#a52a2a'},
-    banshee: {hp: 40, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 5, color: '#e0ffff'},
-    lich: {hp: 60, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 24, isBoss: true, color: '#9370db'},
-    gargoyle: {hp: 100, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 17, color: '#696969'},
-    doomknight: {hp: 1000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 170, isBoss: true, color: '#4b0082'},
-    ghoul: {hp: 4, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.8, color: '#556b2f', isHorde: true},
+    goblin:{hp:6,dmg:6,armor:1,speed:80,size:12,xpValue:0.8, color: '#8fbc8f'},
+    orc:{hp:60,dmg:9,armor:3,speed:60,size:18,xpValue:2.5, color: '#d2691e'},
+    bat:{hp:4,dmg:5,armor:0,speed:120,size:8,xpValue:0.5, color: '#a9a9a9'},
+    skeleton:{hp:25,dmg:10,armor:2,speed:70,size:14,xpValue:1.5, color: '#f5f5dc'},
+    golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
+    ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
+    sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
+    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'},
+    banshee: {hp: 50, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 3, color: '#e0ffff'},
+    lich: {hp: 200, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 15, isBoss: true, color: '#9370db'},
+    gargoyle: {hp: 300, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 10, color: '#696969'},
+    doomknight: {hp: 2000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 150, isBoss: true, color: '#4b0082'},
+    ghoul: {hp: 15, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.5, color: '#556b2f', isHorde: true},
 }; 
  
 class Enemy {
@@ -2312,8 +2370,8 @@ class Enemy {
     applySpawnScaling() {
         const curse = 1 + (player.stats.Curse / 100);
         const minute = Math.floor(gameTime / 60);
-        const hpTimeScaling = 1 + minute/10 * (this.isHordeEnemy ? 0.15 : 0.25);
-        const dmgTimeScaling = 1 + minute/20;
+        const hpTimeScaling = 1 + minute * (this.isHordeEnemy ? 0.15 : 0.25);
+        const dmgTimeScaling = 1 + minute * 0.05;
 
         this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 5 : 1);
         this.dmg = this.dmg * curse * dmgTimeScaling;
@@ -3276,6 +3334,329 @@ player.weaponSlots[0].applyLevelEffects(player.weaponSlots[0].level); // ensure 
 // Keep inventory UI updated when passives change externally 
 updateInventoryUI(); 
 updatePassiveSlotsUI(); 
+
+// --- CONSOLE IMPLEMENTATION ---
+class ConsoleManager {
+    constructor() {
+        this.outputEl = document.getElementById('consoleOutput');
+        this.inputEl = document.getElementById('consoleInput');
+        this.history = [];
+        this.historyIndex = -1;
+        this.commands = {};
+        this.currentSuggestion = '';
+
+        this.inputEl.addEventListener('keydown', this.onKeyDown.bind(this));
+        this.inputEl.addEventListener('input', this.onInput.bind(this));
+    }
+
+    onInput() {
+        this.updateSuggestions();
+    }
+
+    updateSuggestions() {
+        const text = this.inputEl.value;
+        const suggestionEl = document.getElementById('autocompleteSuggestion');
+
+        if (!text) {
+            suggestionEl.textContent = '';
+            this.currentSuggestion = '';
+            return;
+        }
+
+        const parts = text.split(' ');
+        const command = parts[0];
+        const arg = parts.length > 1 ? parts[parts.length - 1] : '';
+
+        let suggestions = [];
+        if (parts.length === 1) {
+            suggestions = Object.keys(this.commands).filter(c => c.startsWith(command));
+        } else {
+            const commandDef = this.commands[command];
+            if (commandDef && commandDef.getSuggestions) {
+                suggestions = commandDef.getSuggestions(parts.slice(1));
+            }
+        }
+
+        if (suggestions.length > 0) {
+            const match = suggestions.find(s => s.startsWith(arg));
+            if (match) {
+                this.currentSuggestion = [...parts.slice(0, parts.length - 1), match].join(' ');
+                suggestionEl.textContent = this.currentSuggestion;
+            } else {
+                suggestionEl.textContent = '';
+                this.currentSuggestion = '';
+            }
+        } else {
+            suggestionEl.textContent = '';
+            this.currentSuggestion = '';
+        }
+    }
+
+    onKeyDown(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            if (this.currentSuggestion) {
+                this.inputEl.value = this.currentSuggestion;
+                this.onInput();
+            }
+        } else if (e.key === 'Enter') {
+            const text = this.inputEl.value;
+            if (text) {
+                this.executeCommand(text);
+                this.history.unshift(text);
+                if (this.history.length > 50) this.history.pop();
+                this.historyIndex = -1;
+                this.inputEl.value = '';
+                this.onInput();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (this.history.length > 0 && this.historyIndex < this.history.length - 1) {
+                this.historyIndex++;
+                this.inputEl.value = this.history[this.historyIndex];
+                this.onInput();
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (this.historyIndex > 0) {
+                this.historyIndex--;
+                this.inputEl.value = this.history[this.historyIndex];
+            } else {
+                this.historyIndex = -1;
+                this.inputEl.value = '';
+            }
+            this.onInput();
+        }
+    }
+
+    registerCommand(name, handler, description = '', getSuggestions = null) {
+        this.commands[name] = { handler, description, getSuggestions };
+    }
+
+    executeCommand(text) {
+        this.log(`> ${text}`);
+        const [command, ...args] = text.trim().split(/\s+/);
+        if (this.commands[command]) {
+            try {
+                const result = this.commands[command].handler(args);
+                if (result) this.log(result, 'log-success');
+            } catch (error) {
+                this.log(`Error: ${error.message}`, 'log-error');
+            }
+        } else {
+            this.log(`Unknown command: ${command}`, 'log-error');
+        }
+    }
+
+    log(message, className = '') {
+        const div = document.createElement('div');
+        div.textContent = message;
+        if (className) div.className = className;
+        this.outputEl.appendChild(div);
+        this.outputEl.scrollTop = this.outputEl.scrollHeight;
+    }
+}
+
+const consoleManager = new ConsoleManager();
+
+// --- COMMAND DEFINITIONS ---
+consoleManager.registerCommand('give', (args) => {
+    const [type, name, value = '1'] = args;
+    if (!type || !name) throw new Error('Usage: give <type> <name> [value]');
+
+    const numValue = parseInt(value, 10);
+    if (isNaN(numValue)) throw new Error('INVALID_VALUE');
+
+    switch (type) {
+        case 'item': {
+    const isWeapon = !!weaponsCatalog[name];
+    const isPassive = !!passiveMap[name];
+
+    if (!isWeapon && !isPassive) {
+        throw new Error(`Item '${name}' NOT_FOUND`);
+    }
+
+    if (isWeapon) {
+        let weaponInstance = player.weaponSlots.find(w => w && w.id === name);
+        if (weaponInstance) { // Already has weapon, level up
+            const currentLevel = weaponInstance.level;
+            const targetLevel = Math.min(weaponInstance.maxLevel, currentLevel + numValue);
+            if (currentLevel >= weaponInstance.maxLevel) {
+                throw new Error('MAX_LEVEL_REACHED');
+            }
+            weaponInstance.applyLevelEffects(targetLevel);
+            updateInventoryUI();
+            return `Leveled up ${weaponInstance.name} to level ${targetLevel}.`;
+        } else { // New weapon
+            const freeSlot = player.weaponSlots.findIndex(s => !s);
+            if (freeSlot === -1) {
+                throw new Error('SLOTS_FULL');
+            }
+            const template = weaponsCatalog[name];
+            const newWeapon = cloneWeaponTemplate(template);
+            player.weaponSlots[freeSlot] = newWeapon;
+            const targetLevel = Math.min(newWeapon.maxLevel, numValue);
+            newWeapon.applyLevelEffects(targetLevel);
+            updateInventoryUI();
+            return `Gave player ${newWeapon.name} (level ${newWeapon.level}).`;
+        }
+    } else { // isPassive
+        const passiveTemplate = passiveMap[name];
+        const currentLevel = player.passiveLevels[name] || 0;
+
+        if (currentLevel > 0) { // Already has passive, level up
+            if (currentLevel >= passiveTemplate.maxLevel) {
+                throw new Error('MAX_LEVEL_REACHED');
+            }
+            const targetLevel = Math.min(passiveTemplate.maxLevel, currentLevel + numValue);
+            for (let i = currentLevel; i < targetLevel; i++) {
+                levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+            }
+            player.passiveLevels[name] = targetLevel;
+            updateInventoryUI();
+            updatePassiveSlotsUI();
+            return `Leveled up ${passiveTemplate.name} to level ${targetLevel}.`;
+        } else { // New passive
+            const freeSlot = player.passiveSlots.findIndex(s => !s);
+            if (freeSlot === -1) {
+                throw new Error('SLOTS_FULL');
+            }
+            player.passiveSlots[freeSlot] = name;
+            const targetLevel = Math.min(passiveTemplate.maxLevel, numValue);
+            for (let i = 0; i < targetLevel; i++) {
+                levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+            }
+            player.passiveLevels[name] = targetLevel;
+            updateInventoryUI();
+            updatePassiveSlotsUI();
+            return `Gave player ${passiveTemplate.name} (level ${targetLevel}).`;
+        }
+    }
+}
+        case 'coins':
+            player.coins += numValue;
+            return `Added ${numValue} coins.`;
+        case 'xp':
+            player.addXP(numValue);
+            return `Added ${numValue} XP.`;
+        case 'stat':
+            if (!player.stats.hasOwnProperty(name)) throw new Error('NOT_FOUND');
+            player.stats[name] += numValue;
+            return `Increased ${name} by ${numValue}.`;
+        default:
+            throw new Error('INVALID_TYPE');
+    }
+}, 'Gives the player items, currency, or stats.', (args) => {
+    const [type, name] = args;
+    if (args.length <= 1) {
+        return ['item', 'coins', 'xp', 'stat'].filter(s => s.startsWith(type || ''));
+    }
+    if (type === 'item' && args.length <= 2) {
+        const allItems = { ...weaponsCatalog, ...passiveMap };
+        return Object.values(allItems).map(i => i.id).filter(id => id.startsWith(name || ''));
+    }
+    if (type === 'stat' && args.length <= 2) {
+        return Object.keys(player.stats).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('set', (args) => {
+    const [type, name, value] = args;
+    if (!type || !name || value === undefined) throw new Error('Usage: set <type> <name> <value>');
+
+    const numValue = parseInt(value, 10);
+    if (isNaN(numValue)) throw new Error('INVALID_VALUE');
+
+    switch (type) {
+        case 'time':
+            const minutes = parseInt(name, 10);
+            const seconds = value ? parseInt(value, 10) : 0;
+            if (isNaN(minutes) || isNaN(seconds)) throw new Error('Usage: set time <minutes> [seconds]');
+            gameTime = minutes * 60 + seconds;
+            return `Game time set to ${minutes}m ${seconds}s.`;
+        case 'stat':
+            if (!player.stats.hasOwnProperty(name)) throw new Error('NOT_FOUND');
+            player.stats[name] = numValue;
+            return `Set ${name} to ${numValue}.`;
+        default:
+            throw new Error('INVALID_TYPE');
+    }
+}, 'Sets a game value or player stat.', (args) => {
+    const [type] = args;
+    if (args.length <= 1) {
+        return ['time', 'stat'].filter(s => s.startsWith(type || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('spawn', (args) => {
+    const [enemyName, amount = '1'] = args;
+    if (!enemyName) throw new Error('Usage: spawn <enemyName> [amount]');
+
+    if (!EnemyTypes[enemyName]) throw new Error('ENEMY_NOT_FOUND');
+    const numAmount = parseInt(amount, 10);
+    if (isNaN(numAmount) || numAmount < 1) throw new Error('INVALID_AMOUNT');
+
+    for (let i = 0; i < numAmount; i++) {
+        const e = enemies.spawn();
+        e.init(enemyName);
+        e.spawn(player.x, player.y);
+    }
+    return `Spawned ${numAmount} ${enemyName}(s).`;
+}, 'Spawns enemies near the player.', (args) => {
+    const [enemyName] = args;
+    if (args.length <= 1) {
+        return Object.keys(EnemyTypes).filter(e => e.startsWith(enemyName || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('item_level', (args) => {
+    const [line, column, level] = args.map(Number);
+    if (isNaN(line) || isNaN(column) || isNaN(level)) throw new Error('Usage: item_level <line> <column> <level>');
+    if (line < 1 || line > 2) throw new Error('INVALID_LINE: 1 for weapons, 2 for passives.');
+    if (column < 1 || column > 6) throw new Error('INVALID_COLUMN: Must be between 1 and 6.');
+
+    const slotIndex = column - 1;
+    if (line === 1) {
+        const weapon = player.weaponSlots[slotIndex];
+        if (!weapon) throw new Error('SLOT_EMPTY');
+        if (level < 1 || level > weapon.maxLevel) throw new Error(`INVALID_LEVEL: Must be between 1 and ${weapon.maxLevel}.`);
+        weapon.applyLevelEffects(level);
+    } else {
+        const passiveId = player.passiveSlots[slotIndex];
+        if (!passiveId) throw new Error('SLOT_EMPTY');
+        const passive = passiveMap[passiveId];
+        if (level < 1 || level > passive.maxLevel) throw new Error(`INVALID_LEVEL: Must be between 1 and ${passive.maxLevel}.`);
+
+        const currentLevel = player.passiveLevels[passiveId] || 0;
+        const levelDelta = level - currentLevel;
+
+        if (levelDelta !== 0) {
+            const statChange = levelDelta * passive.value;
+            levelUpController.applyStat(passive.stat, statChange);
+        }
+
+        player.passiveLevels[passiveId] = level;
+    }
+    updateInventoryUI();
+    return `Set item at (${line}, ${column}) to level ${level}.`;
+}, 'Sets the level of an item in the inventory.');
+
+consoleManager.registerCommand('help', (args) => {
+    if (args[0]) {
+        const cmd = consoleManager.commands[args[0]];
+        if (cmd) return `${args[0]}: ${cmd.description}`;
+        throw new Error('COMMAND_NOT_FOUND');
+    }
+    return 'Available commands: ' + Object.keys(consoleManager.commands).join(', ');
+}, 'Shows a list of commands or help for a specific command.');
+
+consoleManager.registerCommand('clear', () => {
+    consoleManager.outputEl.innerHTML = '';
+    return 'Console cleared.';
+}, 'Clears the console output.');
  
 </script> 
 </body> 

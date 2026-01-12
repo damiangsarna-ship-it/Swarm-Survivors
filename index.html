@@ -2315,7 +2315,7 @@ class Enemy {
         const hpTimeScaling = 1 + minute * (this.isHordeEnemy ? 0.15 : 0.25);
         const dmgTimeScaling = 1 + minute * 0.05;
 
-        this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 10 : 1);
+        this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 5 : 1);
         this.dmg = this.dmg * curse * dmgTimeScaling;
 
         if (timeStopEffect.active) {
@@ -2388,6 +2388,7 @@ class Enemy {
                     const finalDmg = Math.max(1, this.orbitDamage - e.armor);
                     e.hp -= finalDmg;
                     e.hitFlash = 0.2;
+                const h = hitmarks.spawn(); h.spawn(e.x, e.y, finalDmg, "#add8e6");
                 }
             }
 
@@ -2499,17 +2500,17 @@ const spawnTimeline = [
     ['golem', 'tank'],       // 7-8 min
     ['sprinter', 'tank', 'orc', 'skeleton'], // 8-9 min
     ['golem', 'ogre_boss'], // 9-10 min
-    ['banshee', 'golem'], // 10-11 min
-    ['banshee', 'sprinter', 'tank'], // 11-12 min
-    ['gargoyle', 'orc', 'skeleton'], // 12-13 min
-    ['gargoyle', 'lich'], // 13-14 min
-    ['banshee', 'gargoyle', 'sprinter'], // 14-15 min
-    ['doomknight'], // 15-16 min
-    ['lich', 'banshee', 'golem'], // 16-18 min
-    ['gargoyle', 'tank', 'sprinter', 'orc'], // 18-20 min
-    ['doomknight', 'lich'], // 20-22 min
-    ['banshee', 'gargoyle', 'golem', 'tank'], // 22-25 min
-    ['doomknight', 'lich', 'ogre_boss'], // 25-30 min
+    ['banshee', 'golem'], // 10-12 min
+    ['banshee', 'sprinter', 'tank'], // 12-14 min
+    ['gargoyle', 'orc', 'skeleton'], // 14-16 min
+    ['gargoyle', 'lich'], // 16-18 min
+    ['banshee', 'gargoyle', 'sprinter'], // 18-20 min
+    ['doomknight'], // 20-22 min
+    ['lich', 'banshee', 'golem'], // 22-24 min
+    ['gargoyle', 'tank', 'sprinter', 'orc'], // 24-26 min
+    ['doomknight', 'lich'], // 26-28 min
+    ['banshee', 'gargoyle', 'golem', 'tank'], // 28-30 min
+    ['doomknight', 'lich', 'ogre_boss'], // 30+ min
 ];
  
 // ------------------- XP crystals (magnet rework applied) ------------------- 
@@ -2740,6 +2741,7 @@ class FlameParticle {
                 const finalDmg = Math.max(1, this.damage - e.armor);
                 e.hp -= finalDmg;
                 this.hitEnemies.add(e);
+                const h = hitmarks.spawn(); h.spawn(e.x, e.y, finalDmg, "#ff4500");
             }
         }
 

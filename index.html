@@ -278,9 +278,9 @@ class Player{
     this.invuln = 0; this.recoveryTimer=1; 
     this.x=0; this.y=0; this.r=12; 
     this.stats={ 
-      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":0,"Area":1, 
-      "Speed":1,"Duration":1,"Amount":0,"Cooldown":0,"Luck":0,"Growth":2500,"Greed":0, 
-      "Curse":0,"Magnet":1,"Revival":1 
+      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":10,"Area":2, 
+      "Speed":5,"Duration":5,"Amount":0,"Cooldown":10,"Luck":0,"Growth":10,"Greed":0, 
+      "Curse":0,"Magnet":5,"Revival":1 
     }; 
     this.hp=this.stats["Max Health"]; 
     this.maxhp=this.stats["Max Health"]; 
@@ -2236,19 +2236,19 @@ function randPickAndRemove(arr){ const idx = Math.floor(Math.random()*arr.length
 function shuffleArray(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; } 
 // ------------------- Enemy types & enemy pool ------------------- 
 const EnemyTypes={ 
-    goblin:{hp:6,dmg:6,armor:1,speed:80,size:12,xpValue:0.8, color: '#8fbc8f'}, 
-    orc:{hp:60,dmg:9,armor:3,speed:60,size:18,xpValue:2.5, color: '#d2691e'},
-    bat:{hp:4,dmg:5,armor:0,speed:120,size:8,xpValue:0.5, color: '#a9a9a9'},
-    skeleton:{hp:25,dmg:10,armor:2,speed:70,size:14,xpValue:1.5, color: '#f5f5dc'},
-    golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
-    ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
-    sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
-    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'},
-    banshee: {hp: 50, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 3, color: '#e0ffff'},
-    lich: {hp: 200, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 15, isBoss: true, color: '#9370db'},
-    gargoyle: {hp: 300, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 10, color: '#696969'},
-    doomknight: {hp: 2000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 150, isBoss: true, color: '#4b0082'},
-    ghoul: {hp: 15, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.5, color: '#556b2f', isHorde: true},
+    goblin:{hp:3,dmg:6,armor:1,speed:80,size:12,xpValue:0.9, color: '#8fbc8f'}, 
+    orc:{hp:15,dmg:9,armor:3,speed:60,size:18,xpValue:6.5, color: '#d2691e'},
+    bat:{hp:2,dmg:5,armor:0,speed:120,size:8,xpValue:0.6, color: '#a9a9a9'},
+    skeleton:{hp:9,dmg:10,armor:2,speed:70,size:14,xpValue:5.5, color: '#f5f5dc'},
+    golem:{hp:30,dmg:12,armor:5,speed:40,size:24,xpValue:15, color: '#708090'},
+    ogre_boss:{hp:180,dmg:15,armor:10,speed:50,size:32,xpValue:53, isBoss: true, color: '#dc143c'},
+    sprinter: {hp: 6, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 2.8, color: '#add8e6'},
+    tank: {hp: 80, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 13, color: '#a52a2a'},
+    banshee: {hp: 40, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 5, color: '#e0ffff'},
+    lich: {hp: 60, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 24, isBoss: true, color: '#9370db'},
+    gargoyle: {hp: 100, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 17, color: '#696969'},
+    doomknight: {hp: 1000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 170, isBoss: true, color: '#4b0082'},
+    ghoul: {hp: 4, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.8, color: '#556b2f', isHorde: true},
 }; 
  
 class Enemy {
@@ -2312,8 +2312,8 @@ class Enemy {
     applySpawnScaling() {
         const curse = 1 + (player.stats.Curse / 100);
         const minute = Math.floor(gameTime / 60);
-        const hpTimeScaling = 1 + minute * (this.isHordeEnemy ? 0.15 : 0.25);
-        const dmgTimeScaling = 1 + minute * 0.05;
+        const hpTimeScaling = 1 + minute/10 * (this.isHordeEnemy ? 0.15 : 0.25);
+        const dmgTimeScaling = 1 + minute/20;
 
         this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 5 : 1);
         this.dmg = this.dmg * curse * dmgTimeScaling;

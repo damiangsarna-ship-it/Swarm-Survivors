@@ -132,6 +132,7 @@ button:active { transform:scale(0.95); }
 <canvas id="gameCanvas"></canvas> 
  
 <div id="uiLayer"> 
+  <div id="flashEffect" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 9999; display: none; pointer-events: none; opacity: 0;"></div>
   <div id="stats"></div> 
  
   <div class="bar-container hud-element" id="weaponBar"></div> 
@@ -184,6 +185,8 @@ const input={up:0,down:0,left:0,right:0};
 let paused=false; 
 let dead=false; 
 let gameTime = 0; 
+let isGameFrozen = false;
+let gameFreezeTimer = 0;
  
 // Input handling 
 window.addEventListener("keydown",e=>{ 
@@ -293,6 +296,7 @@ class Player{
     this.xp=0; 
     this.level=1; 
     this.xpToNext=10;
+    this.pendingLevels = 0;
     this.coins = 0;
     this.kills = 0;
     this.flameBreath = { active: false, timer: 0, damage: 0 };
@@ -347,22 +351,29 @@ class Player{
     if(this.hp===0 && !dead) triggerDeath(); 
   } 
  
-  addXP(xp){ 
-    const growthMult = 1 + (this.stats["Growth"] / 100); 
-    const gainedXP = xp * growthMult; 
-    const intPart = Math.floor(gainedXP); 
-    const frac = gainedXP - intPart; 
-    const finalXP = intPart + (Math.random() < frac ? 1 : 0); 
-    this.xp += finalXP; 
- 
-    if(this.xp >= this.xpToNext){ 
-      this.xp -= this.xpToNext; 
-      this.level++; 
-      this.xpToNext = Math.floor(this.xpToNext * 1.25); 
-      const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0"); 
-      levelUpController.onLevelUp(); 
-    } 
-  } 
+  addXP(xp){
+    const growthMult = 1 + (this.stats["Growth"] / 100);
+    const gainedXP = xp * growthMult;
+    const intPart = Math.floor(gainedXP);
+    const frac = gainedXP - intPart;
+    const finalXP = intPart + (Math.random() < frac ? 1 : 0);
+    this.xp += finalXP;
+
+    let leveledUp = false;
+    while (this.xp >= this.xpToNext) {
+        this.xp -= this.xpToNext;
+        this.level++;
+        this.xpToNext = Math.floor(this.xpToNext * 1.25);
+        this.pendingLevels++;
+        leveledUp = true;
+    }
+
+    if (leveledUp) {
+        const h = hitmarks.spawn();
+        h.spawn(this.x, this.y - 20, "LEVEL UP!", "#ff0");
+        levelUpController.onLevelUp();
+    }
+  }
  
   render(){ 
     ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.angle); 
@@ -1740,11 +1751,17 @@ const levelUpController = {
     }).filter(x=>x); 
   }, 
  
-  onLevelUp(){ 
-    const choices = this.pickChoices(); 
-    if(choices.length === 0) return; 
-    this.showChoices(choices); 
-  }, 
+  onLevelUp(){
+      if (player.pendingLevels > 0 && !this.showing) {
+          const choices = this.pickChoices();
+          if (choices.length > 0) {
+              this.showChoices(choices);
+          } else {
+              // No choices available, so clear pending levels
+              player.pendingLevels = 0;
+          }
+      }
+  },
  
   showChoices(choices){ 
     audioManager.play('level_up');
@@ -1798,13 +1815,22 @@ const levelUpController = {
     } 
   }, 
  
-  hideChoices(){ 
-    this.showing=false; 
-    const el=document.getElementById("levelUpScreen"); 
-    el.style.display="none"; el.setAttribute("aria-hidden","true"); 
-    paused=false; 
-    updatePassiveSlotsUI(); updateInventoryUI(); 
-  }, 
+  hideChoices(){
+    this.showing = false;
+    const el = document.getElementById("levelUpScreen");
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
+
+    player.pendingLevels--;
+
+    if (player.pendingLevels > 0) {
+        this.onLevelUp();
+    } else {
+        paused = false;
+    }
+    updatePassiveSlotsUI();
+    updateInventoryUI();
+  },
  
   applyChoice(choice){ 
     if(choice.kind === "passive"){ 
@@ -2223,8 +2249,88 @@ const EnemyTypes={
     golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
     ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
     sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
-    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'}
+    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'},
+    banshee: {hp: 50, dmg: 20, armor: 2, speed: 160, size: 14, xpValue: 10, color: '#e6e6fa'},
+    lich: {hp: 200, dmg: 25, armor: 5, speed: 60, size: 20, xpValue: 25, color: '#9932cc'},
+    dragon: {hp: 1000, dmg: 40, armor: 15, speed: 40, size: 40, xpValue: 100, color: '#8b0000'},
+    vampire_lord: {hp: 2500, dmg: 35, armor: 10, speed: 70, size: 35, xpValue: 200, isBoss: true, color: '#4b0082'},
+    horde_goblin: {hp: 5, dmg: 5, armor: 0, speed: 100, size: 10, xpValue: 0.2, color: '#7cfc00'}
 }; 
+
+class HordeEnemy extends Enemy {
+    constructor() {
+        super('horde_goblin');
+        this.targetX = 0;
+        this.targetY = 0;
+    }
+
+    spawn(px, py) {
+        const side = Math.floor(Math.random() * 4);
+        const spawnMargin = 50;
+
+        switch(side) {
+            case 0: // Top
+                this.x = Math.random() * canvas.width;
+                this.y = -spawnMargin;
+                this.targetX = Math.random() * canvas.width;
+                this.targetY = canvas.height + spawnMargin;
+                break;
+            case 1: // Right
+                this.x = canvas.width + spawnMargin;
+                this.y = Math.random() * canvas.height;
+                this.targetX = -spawnMargin;
+                this.targetY = Math.random() * canvas.height;
+                break;
+            case 2: // Bottom
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height + spawnMargin;
+                this.targetX = Math.random() * canvas.width;
+                this.targetY = -spawnMargin;
+                break;
+            case 3: // Left
+                this.x = -spawnMargin;
+                this.y = Math.random() * canvas.height;
+                this.targetX = canvas.width + spawnMargin;
+                this.targetY = Math.random() * canvas.height;
+                break;
+        }
+
+        const curse = 1 + (player.stats.Curse / 100);
+        const minute = Math.floor(gameTime / 60);
+        const hpTimeScaling = 1 + minute * 0.3;
+        this.hp = this.maxhp * curse * hpTimeScaling;
+    }
+
+    update(dt) {
+        if (this.isFrozen) {
+            this.freezeTimer -= dt;
+            if (this.freezeTimer <= 0) this.isFrozen = false;
+            return;
+        }
+
+        const dx = this.targetX - this.x;
+        const dy = this.targetY - this.y;
+        const d = Math.hypot(dx, dy) || 1;
+        this.x += (dx / d) * this.baseSpd * dt;
+        this.y += (dy / d) * this.baseSpd * dt;
+
+        if (this.x < -100 || this.x > canvas.width + 100 || this.y < -100 || this.y > canvas.height + 100) {
+            hordeEnemies.recycle(this);
+        }
+
+        if (Math.hypot(player.x - this.x, player.y - this.y) < this.r + player.r && player.invuln <= 0) {
+            const damage = Math.max(1, this.dmg - player.stats.Armor);
+            player.hp -= damage;
+            player.invuln = 0.2;
+        }
+
+        if (this.hp <= 0) {
+            dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
+            player.kills++;
+            hordeEnemies.recycle(this);
+        }
+    }
+}
  
 class Enemy { 
   constructor(type = "goblin") { 
@@ -2434,6 +2540,7 @@ class Enemy {
  
  
 const enemies = new Pool(()=>new Enemy(),500); 
+const hordeEnemies = new Pool(()=>new HordeEnemy(), 200);
 let spawnTimer = 0;
 let lastSpawnMinute = -1;
 let enemyLimit = 50;
@@ -2446,10 +2553,10 @@ const spawnTimeline = [
     ['skeleton', 'sprinter'], // 3-4 min
     ['skeleton', 'orc'], // 4-5 min
     ['orc', 'sprinter', 'tank'], // 5-6 min
-    ['golem', 'sprinter'], // 6-7 min
-    ['golem', 'tank'],       // 7-8 min
-    ['sprinter', 'tank', 'orc', 'skeleton'], // 8-9 min
-    ['golem', 'ogre_boss'] // 9-10 min
+    ['golem', 'sprinter', 'banshee'], // 6-7 min
+    ['golem', 'tank', 'lich'], // 7-8 min
+    ['banshee', 'lich', 'dragon'], // 8-9 min
+    ['dragon', 'vampire_lord'] // 9-10 min
 ];
  
 // ------------------- XP crystals (magnet rework applied) ------------------- 
@@ -2592,14 +2699,19 @@ class Pickup {
                 enemies.active.forEach(e => {
                     if (!EnemyTypes[e.type].isBoss) e.hp = 0;
                 });
-                // Add screen flash effect
-                document.body.style.transition = 'background-color 0.1s';
-                document.body.style.backgroundColor = 'white';
-                setTimeout(() => document.body.style.backgroundColor = '#050505', 100);
+                const flash = document.getElementById('flashEffect');
+                flash.style.display = 'block';
+                flash.style.opacity = '1';
+                setTimeout(() => {
+                    flash.style.transition = 'opacity 0.5s';
+                    flash.style.opacity = '0';
+                    setTimeout(() => flash.style.display = 'none', 500);
+                }, 100);
                 break;
             case 'clock':
-                const duration = 8 * (1 + (player.stats.Duration || 0) / 100);
-                enemies.active.forEach(e => e.freeze(duration));
+                isGameFrozen = true;
+                gameFreezeTimer = 8 * (1 + (player.stats.Duration || 0) / 100);
+                enemies.active.forEach(e => e.freeze(gameFreezeTimer));
                 break;
             case 'clover':
                 player.stats.Luck += 10;
@@ -2614,8 +2726,12 @@ class Pickup {
         ctx.save();
         ctx.translate(this.x, this.y);
         let icon = '?';
+        let fontSize = 24;
         switch (this.type) {
-            case 'coin': icon = '🪙'; break;
+            case 'coin':
+                icon = '🪙';
+                fontSize = 16;
+                break;
             case 'coin_bag':
             case 'chest_coin_bag': icon = '💰'; break;
             case 'chest': icon = '📦'; break;
@@ -2626,8 +2742,8 @@ class Pickup {
             case 'clock': icon = '🕒'; break;
             case 'clover': icon = '🍀'; break;
         }
-        ctx.font = '24px serif';
-        ctx.fillText(icon, -12, 12);
+        ctx.font = `${fontSize}px serif`;
+        ctx.fillText(icon, -fontSize/2, fontSize/2);
         ctx.restore();
     }
 }
@@ -2963,10 +3079,26 @@ function update(dt){
     lastSpawnMinute = minute;
     enemyLimit += 10; // Increase enemy limit every minute
     minEnemyLimit += 2; // Increase min enemy limit every minute
-    if (minute > 0 && minute % 2 === 0) {
+    if (minute > 0 && minute % 2 === 0 && minute < 9) {
       const e = enemies.spawn();
       e.type = 'ogre_boss';
       e.spawn(player.x, player.y);
+    }
+    if (minute === 9) {
+        const e = enemies.spawn();
+        e.type = 'vampire_lord';
+        e.spawn(player.x, player.y);
+    }
+
+    if (minute > 0 && minute % 1 === 0) { // Horde spawn every minute
+        const hordeSize = 10 + minute * 2;
+        for (let i = 0; i < hordeSize; i++) {
+            setTimeout(() => {
+                const h = hordeEnemies.spawn();
+                h.spawn();
+                if (isGameFrozen) h.freeze(gameFreezeTimer);
+            }, i * 100);
+        }
     }
   }
 
@@ -2984,9 +3116,20 @@ function update(dt){
     const e = enemies.spawn();
     e.type = spawnTypes[Math.floor(Math.random() * spawnTypes.length)];
     e.spawn(player.x, player.y);
+    if (isGameFrozen) {
+      e.freeze(gameFreezeTimer);
+    }
+  }
+
+  if (isGameFrozen) {
+    gameFreezeTimer -= dt;
+    if (gameFreezeTimer <= 0) {
+      isGameFrozen = false;
+    }
   }
 
   enemies.active.slice().forEach(e => e.update(dt));
+  hordeEnemies.active.slice().forEach(e => e.update(dt));
   projectiles.active.slice().forEach(p => p.update(dt));
   crossProjectiles.active.slice().forEach(p => p.update(dt));
   fireballs.active.slice().forEach(f => f.update(dt));
@@ -3104,6 +3247,7 @@ function render(){
   pickups.active.forEach(p => p.render());
   breakables.active.forEach(b => b.render());
   enemies.active.forEach(e => e.render()); 
+  hordeEnemies.active.forEach(e => e.render());
   projectiles.active.forEach(p => p.render()); 
   crossProjectiles.active.forEach(p => p.render());
   fireballs.active.forEach(f => f.render());

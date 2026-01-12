@@ -167,6 +167,7 @@ button:active { transform:scale(0.95); }
       <button id="skipChestBtn" style="margin-top: 20px;">Skip</button>
       <button id="closeChestBtn" style="margin-top: 20px; display: none;">Claim</button>
   </div>
+    <div id="flashOverlay" style="position:absolute; top:0; left:0; width:100%; height:100%; background:white; opacity:0; pointer-events:none; z-index:999;"></div>
 </div> 
  
 <script> 
@@ -184,6 +185,7 @@ const input={up:0,down:0,left:0,right:0};
 let paused=false; 
 let dead=false; 
 let gameTime = 0; 
+let timeStopEffect = { active: false, timer: 0 };
  
 // Input handling 
 window.addEventListener("keydown",e=>{ 
@@ -296,6 +298,7 @@ class Player{
     this.coins = 0;
     this.kills = 0;
     this.flameBreath = { active: false, timer: 0, damage: 0 };
+    this.pendingLevelUps = 0;
   } 
  
   update(dt){ 
@@ -347,22 +350,26 @@ class Player{
     if(this.hp===0 && !dead) triggerDeath(); 
   } 
  
-  addXP(xp){ 
-    const growthMult = 1 + (this.stats["Growth"] / 100); 
-    const gainedXP = xp * growthMult; 
-    const intPart = Math.floor(gainedXP); 
-    const frac = gainedXP - intPart; 
-    const finalXP = intPart + (Math.random() < frac ? 1 : 0); 
-    this.xp += finalXP; 
- 
-    if(this.xp >= this.xpToNext){ 
-      this.xp -= this.xpToNext; 
-      this.level++; 
-      this.xpToNext = Math.floor(this.xpToNext * 1.25); 
-      const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0"); 
-      levelUpController.onLevelUp(); 
-    } 
-  } 
+  addXP(xp){
+    const growthMult = 1 + (this.stats["Growth"] / 100);
+    const gainedXP = xp * growthMult;
+    const intPart = Math.floor(gainedXP);
+    const frac = gainedXP - intPart;
+    const finalXP = intPart + (Math.random() < frac ? 1 : 0);
+    this.xp += finalXP;
+
+    while (this.xp >= this.xpToNext) {
+        this.xp -= this.xpToNext;
+        this.level++;
+        this.xpToNext = Math.floor(this.xpToNext * 1.25);
+        this.pendingLevelUps++;
+        const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0");
+    }
+
+    if (this.pendingLevelUps > 0 && !levelUpController.showing) {
+        levelUpController.onLevelUp();
+    }
+}
  
   render(){ 
     ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.angle); 
@@ -1741,9 +1748,14 @@ const levelUpController = {
   }, 
  
   onLevelUp(){ 
-    const choices = this.pickChoices(); 
-    if(choices.length === 0) return; 
-    this.showChoices(choices); 
+    if (player.pendingLevelUps > 0) {
+        const choices = this.pickChoices();
+        if(choices.length === 0) {
+            player.pendingLevelUps = 0; // No more upgrades, clear pending
+            return;
+        }
+        this.showChoices(choices);
+    }
   }, 
  
   showChoices(choices){ 
@@ -1798,15 +1810,20 @@ const levelUpController = {
     } 
   }, 
  
-  hideChoices(){ 
-    this.showing=false; 
-    const el=document.getElementById("levelUpScreen"); 
-    el.style.display="none"; el.setAttribute("aria-hidden","true"); 
-    paused=false; 
-    updatePassiveSlotsUI(); updateInventoryUI(); 
-  }, 
+  hideChoices(){
+    if (player.pendingLevelUps > 0) {
+        this.onLevelUp();
+    } else {
+        this.showing=false;
+        const el=document.getElementById("levelUpScreen");
+        el.style.display="none"; el.setAttribute("aria-hidden","true");
+        paused=false;
+        updatePassiveSlotsUI(); updateInventoryUI();
+    }
+  },
  
   applyChoice(choice){ 
+    player.pendingLevelUps--;
     if(choice.kind === "passive"){ 
       const p = passiveMap[choice.data.id]; if(!p) return; 
       const lvl = player.passiveLevels[p.id]||0; 
@@ -1997,7 +2014,10 @@ const chestController = {
         
         const reward = this.rewards[index];
         let rewardIcon = '💰';
-        if (reward.id) {
+        if (reward.type === 'evolution') {
+            const evolvedWeapon = weaponsCatalog[reward.recipe.evolvedId];
+            rewardIcon = evolvedWeapon.icon;
+        } else if (reward.id) {
             rewardIcon = reward.icon;
         }
 
@@ -2223,193 +2243,246 @@ const EnemyTypes={
     golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
     ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
     sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
-    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'}
+    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'},
+    banshee: {hp: 50, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 3, color: '#e0ffff'},
+    lich: {hp: 200, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 15, isBoss: true, color: '#9370db'},
+    gargoyle: {hp: 300, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 10, color: '#696969'},
+    doomknight: {hp: 2000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 150, isBoss: true, color: '#4b0082'},
+    ghoul: {hp: 15, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.5, color: '#556b2f', isHorde: true},
 }; 
  
-class Enemy { 
-  constructor(type = "goblin") { 
-    this.type = type; 
-    const t = EnemyTypes[type]; 
- 
-    // Core stats 
-    this.maxhp = t.hp; 
-    this.hp = t.hp; 
-    this.dmg = t.dmg; 
-    this.armor = t.armor; 
-    this.baseSpd = t.speed; 
-    this.r = t.size; 
- 
-    // Position 
-    this.x = 0; 
-    this.y = 0; 
- 
-    // Hit feedback & debuffs 
-    this.hitFlash = 0;     // visual flash timer (seconds) 
-    this.slowTimer = 0;    // slow duration 
-    this.slowFactor = 1;   // movement multiplier 
-    this.isFrozen = false;
-    this.freezeTimer = 0;
-
-    // Hurricane properties
-    this.isOrbiting = false;
-    this.orbitAngle = 0;
-    this.orbitDist = 0;
-    this.orbitDuration = 0;
-    this.orbitSpeed = 0;
-    this.isPullingToOrbit = false;
-    this.pullToOrbitTimer = 0;
-    this.orbitTrail = [];
-  } 
- 
-  freeze(duration) {
-      this.isFrozen = true;
-      this.freezeTimer = duration;
-  }
-
-  spawn(px, py) { 
-    const ang = Math.random() * Math.PI * 2; 
-    const dist = 400 + Math.random() * 300; 
-    this.x = px + Math.cos(ang) * dist; 
-    this.y = py + Math.sin(ang) * dist; 
- 
-    const curse = 1 + (player.stats.Curse / 100);
-    const minute = Math.floor(gameTime / 60);
-    const hpTimeScaling = 1 + minute * 0.25; // +25% HP per minute
-    const dmgTimeScaling = 1 + minute * 0.05; // +5% DMG per minute
-
-    this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 10 : 1);
-    this.dmg = this.dmg * curse * dmgTimeScaling;
-    this.hitFlash = 0; 
-    this.slowTimer = 0; 
-    this.slowFactor = 1;
-    this.isOrbiting = false;
-    this.isPullingToOrbit = false;
-    this.orbitTrail = [];
-  } 
- 
-  update(dt) { 
-    if (paused || dead) return; 
-
-    if (this.isFrozen) {
-        this.freezeTimer -= dt;
-        if (this.freezeTimer <= 0) {
-            this.isFrozen = false;
-        }
-        return;
+class Enemy {
+    constructor() {
+        this.init('goblin');
     }
 
-    if (this.isPullingToOrbit) {
-        this.pullToOrbitTimer -= dt;
-        const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-        const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
-        this.x += (targetX - this.x) * 0.1;
-        this.y += (targetY - this.y) * 0.1;
+    init(type) {
+        this.type = type;
+        const t = EnemyTypes[type];
 
-        if (this.pullToOrbitTimer <= 0) {
-            this.isPullingToOrbit = false;
-            this.isOrbiting = true;
-        }
-        return;
+        this.maxhp = t.hp;
+        this.hp = t.hp;
+        this.dmg = t.dmg;
+        this.armor = t.armor;
+        this.baseSpd = t.speed;
+        this.r = t.size;
+        this.isHordeEnemy = t.isHorde || false;
+
+        this.x = 0; this.y = 0;
+        this.hordeTargetX = 0; this.hordeTargetY = 0;
+
+        this.hitFlash = 0;
+        this.slowTimer = 0;
+        this.slowFactor = 1;
+        this.isFrozen = false;
+        this.freezeTimer = 0;
+
+        this.isOrbiting = false;
+        this.orbitAngle = 0;
+        this.orbitDist = 0;
+        this.orbitDuration = 0;
+        this.orbitSpeed = 0;
+        this.isPullingToOrbit = false;
+        this.pullToOrbitTimer = 0;
+        this.orbitTrail = [];
     }
 
-    if (this.isOrbiting) {
-        this.orbitAngle += 3 * this.orbitSpeed * dt;
-        this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-        this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+    freeze(duration) {
+        this.isFrozen = true;
+        this.freezeTimer = duration;
+    }
 
-        this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
-        for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
-            this.orbitTrail[i].life -= dt;
-            if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
+    spawn(px, py) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 400 + Math.random() * 300;
+        this.x = px + Math.cos(ang) * dist;
+        this.y = py + Math.sin(ang) * dist;
+        this.applySpawnScaling();
+    }
+
+    spawnAsHordeMember() {
+        const side = Math.floor(Math.random() * 4);
+        const spawnMargin = 50;
+        const targetMargin = 100;
+        const groupSpread = 200;
+
+        switch (side) {
+            case 0: // Top
+                this.x = camera.x + Math.random() * canvas.width;
+                this.y = camera.y - spawnMargin;
+                this.hordeTargetX = this.x + (Math.random() - 0.5) * groupSpread;
+                this.hordeTargetY = camera.y + canvas.height + targetMargin;
+                break;
+            case 1: // Right
+                this.x = camera.x + canvas.width + spawnMargin;
+                this.y = camera.y + Math.random() * canvas.height;
+                this.hordeTargetX = camera.x - targetMargin;
+                this.hordeTargetY = this.y + (Math.random() - 0.5) * groupSpread;
+                break;
+            case 2: // Bottom
+                this.x = camera.x + Math.random() * canvas.width;
+                this.y = camera.y + canvas.height + spawnMargin;
+                this.hordeTargetX = this.x + (Math.random() - 0.5) * groupSpread;
+                this.hordeTargetY = camera.y - targetMargin;
+                break;
+            case 3: // Left
+                this.x = camera.x - spawnMargin;
+                this.y = camera.y + Math.random() * canvas.height;
+                this.hordeTargetX = camera.x + canvas.width + targetMargin;
+                this.hordeTargetY = this.y + (Math.random() - 0.5) * groupSpread;
+                break;
+        }
+
+        this.x += (Math.random() - 0.5) * groupSpread;
+        this.y += (Math.random() - 0.5) * groupSpread;
+        this.applySpawnScaling();
+    }
+
+    applySpawnScaling() {
+        const curse = 1 + (player.stats.Curse / 100);
+        const minute = Math.floor(gameTime / 60);
+        const hpTimeScaling = 1 + minute * (this.isHordeEnemy ? 0.15 : 0.25);
+        const dmgTimeScaling = 1 + minute * 0.05;
+
+        this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 10 : 1);
+        this.dmg = this.dmg * curse * dmgTimeScaling;
+
+        if (timeStopEffect.active) {
+            this.freeze(timeStopEffect.timer);
+        }
+    }
+
+    update(dt) {
+        if (paused || dead) return;
+
+        if (this.isFrozen) {
+            this.freezeTimer -= dt;
+            if (this.freezeTimer <= 0) {
+                this.isFrozen = false;
+            }
+            return;
+        }
+
+        if (this.isPullingToOrbit) {
+            this.pullToOrbitTimer -= dt;
+            const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
+            const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+            this.x += (targetX - this.x) * 0.1;
+            this.y += (targetY - this.y) * 0.1;
+
+            if (this.pullToOrbitTimer <= 0) {
+                this.isPullingToOrbit = false;
+                this.isOrbiting = true;
+            }
+            return;
+        }
+
+        if (this.isOrbiting) {
+            this.orbitAngle += 3 * this.orbitSpeed * dt;
+            this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
+            this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+
+            this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
+            for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
+                this.orbitTrail[i].life -= dt;
+                if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
+            }
+
+            for (const e of enemies.active) {
+                if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
+                    const finalDmg = Math.max(1, this.orbitDamage - e.armor);
+                    e.hp -= finalDmg;
+                    e.hitFlash = 0.2;
+                }
+            }
+
+            for (const b of breakables.active) {
+                if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
+                    b.destroy();
+                }
+            }
+
+            this.orbitDuration -= dt;
+            if (this.orbitDuration <= 0) {
+                this.isOrbiting = false;
+                const finalDmg = Math.max(1, this.orbitDamage * 2); // Final damage burst
+                this.hp -= finalDmg;
+                this.hitFlash = 0.5;
+            }
+            return; // Skip normal behavior
+        }
+
+        if (this.hitFlash > 0) {
+            this.hitFlash -= dt;
+            if (this.hitFlash < 0) this.hitFlash = 0;
+        }
+
+        if (this.slowTimer > 0) {
+            this.slowTimer -= dt;
+            if (this.slowTimer <= 0) {
+                this.slowFactor = 1;
+            }
+        }
+
+        if (this.isHordeEnemy) {
+            const dx = this.hordeTargetX - this.x;
+            const dy = this.hordeTargetY - this.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const effectiveSpeed = this.baseSpd * this.slowFactor;
+            this.x += (dx / d) * effectiveSpeed * dt;
+            this.y += (dy / d) * effectiveSpeed * dt;
+
+            const despawnRange = 200;
+            if (this.x < camera.x - despawnRange || this.x > camera.x + canvas.width + despawnRange ||
+                this.y < camera.y - despawnRange || this.y > camera.y + canvas.height + despawnRange) {
+                enemies.recycle(this);
+                return;
+            }
+        } else {
+            const dx = player.x - this.x;
+            const dy = player.y - this.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const effectiveSpeed = this.baseSpd * this.slowFactor;
+            this.x += (dx / d) * effectiveSpeed * dt;
+            this.y += (dy / d) * effectiveSpeed * dt;
         }
 
         for (const e of enemies.active) {
-            if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
-                const finalDmg = Math.max(1, this.orbitDamage - e.armor);
-                e.hp -= finalDmg;
-                e.hitFlash = 0.2;
+            if (e === this) continue;
+            const dx2 = e.x - this.x;
+            const dy2 = e.y - this.y;
+            const dist = Math.hypot(dx2, dy2);
+            if (dist < e.r + this.r && dist > 0) {
+                const push = 0.5 * (e.r + this.r - dist) / dist;
+                this.x -= dx2 * push;
+                this.y -= dy2 * push;
             }
         }
 
-        for (const b of breakables.active) {
-            if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
-                b.destroy();
-            }
+        if (Math.hypot(player.x - this.x, player.y - this.y) < this.r + player.r && player.invuln <= 0) {
+            const damage = Math.max(1, this.dmg - player.stats.Armor);
+            player.hp -= damage;
+            player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow);
+            player.invuln = 0.2;
+            const h = hitmarks.spawn();
+            h.spawn(this.x, this.y, damage, "#f00");
         }
 
-        this.orbitDuration -= dt;
-        if (this.orbitDuration <= 0) {
-            this.isOrbiting = false;
-            const finalDmg = Math.max(1, this.orbitDamage * 2); // Final damage burst
-            this.hp -= finalDmg;
-            this.hitFlash = 0.5;
+        if (this.hp <= 0) {
+            dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
+            const luck = 1 + (player.stats.Luck / 100);
+            if (Math.random() < 0.01 * luck) {
+                const p = pickups.spawn();
+                p.spawn(this.x, this.y, 'coin');
+            }
+            if (EnemyTypes[this.type].isBoss) {
+                const p = pickups.spawn();
+                p.spawn(this.x, this.y, 'chest');
+            }
+            player.kills++;
+            enemies.recycle(this);
         }
-        return; // Skip normal behavior
     }
- 
-    // ----- Hit flash decay (FIXED: dt belongs here) ----- 
-    if (this.hitFlash > 0) { 
-      this.hitFlash -= dt; 
-      if (this.hitFlash < 0) this.hitFlash = 0; 
-    } 
- 
-    // ----- Slow decay ----- 
-    if (this.slowTimer > 0) { 
-      this.slowTimer -= dt; 
-      if (this.slowTimer <= 0) { 
-        this.slowFactor = 1; 
-      } 
-    } 
- 
-    // ----- Movement ----- 
-    const dx = player.x - this.x; 
-    const dy = player.y - this.y; 
-    const d = Math.hypot(dx, dy) || 1; 
- 
-    const effectiveSpeed = this.baseSpd * this.slowFactor; 
-    this.x += (dx / d) * effectiveSpeed * dt; 
-    this.y += (dy / d) * effectiveSpeed * dt; 
- 
-    // ----- Separation ----- 
-    for (const e of enemies.active) { 
-      if (e === this) continue; 
-      const dx2 = e.x - this.x; 
-      const dy2 = e.y - this.y; 
-      const dist = Math.hypot(dx2, dy2); 
-      if (dist < e.r + this.r && dist > 0) { 
-        const push = 0.5 * (e.r + this.r - dist) / dist; 
-        this.x -= dx2 * push; 
-        this.y -= dy2 * push; 
-      } 
-    } 
- 
-    // ----- Player collision damage ----- 
-    if (d < this.r + player.r && player.invuln <= 0) { 
-      const damage = Math.max(1, this.dmg - player.stats.Armor);
-      player.hp -= damage; 
-      player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow); 
-      player.invuln = 0.2; 
- 
-      const h = hitmarks.spawn(); 
-      h.spawn(this.x, this.y, damage, "#f00"); 
-    } 
- 
-    // ----- Death ----- 
-    if (this.hp <= 0) { 
-      dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
-      const luck = 1 + (player.stats.Luck / 100);
-      if (Math.random() < 0.01 * luck) {
-        const p = pickups.spawn();
-        p.spawn(this.x, this.y, 'coin');
-      }
-      if (EnemyTypes[this.type].isBoss) {
-        const p = pickups.spawn();
-        p.spawn(this.x, this.y, 'chest');
-      }
-      player.kills++;
-      enemies.recycle(this); 
-    } 
-  } 
  
   render() { 
     if (this.isOrbiting) {
@@ -2433,11 +2506,13 @@ class Enemy {
 } 
  
  
-const enemies = new Pool(()=>new Enemy(),500); 
+const enemies = new Pool(()=>new Enemy(), 800);
 let spawnTimer = 0;
 let lastSpawnMinute = -1;
 let enemyLimit = 50;
 let minEnemyLimit = 6;
+
+let hordeSpawnTimer = 30;
 
 const spawnTimeline = [
     ['goblin'], // 0-1 min
@@ -2449,7 +2524,18 @@ const spawnTimeline = [
     ['golem', 'sprinter'], // 6-7 min
     ['golem', 'tank'],       // 7-8 min
     ['sprinter', 'tank', 'orc', 'skeleton'], // 8-9 min
-    ['golem', 'ogre_boss'] // 9-10 min
+    ['golem', 'ogre_boss'], // 9-10 min
+    ['banshee', 'golem'], // 10-11 min
+    ['banshee', 'sprinter', 'tank'], // 11-12 min
+    ['gargoyle', 'orc', 'skeleton'], // 12-13 min
+    ['gargoyle', 'lich'], // 13-14 min
+    ['banshee', 'gargoyle', 'sprinter'], // 14-15 min
+    ['doomknight'], // 15-16 min
+    ['lich', 'banshee', 'golem'], // 16-18 min
+    ['gargoyle', 'tank', 'sprinter', 'orc'], // 18-20 min
+    ['doomknight', 'lich'], // 20-22 min
+    ['banshee', 'gargoyle', 'golem', 'tank'], // 22-25 min
+    ['doomknight', 'lich', 'ogre_boss'], // 25-30 min
 ];
  
 // ------------------- XP crystals (magnet rework applied) ------------------- 
@@ -2592,13 +2678,17 @@ class Pickup {
                 enemies.active.forEach(e => {
                     if (!EnemyTypes[e.type].isBoss) e.hp = 0;
                 });
-                // Add screen flash effect
-                document.body.style.transition = 'background-color 0.1s';
-                document.body.style.backgroundColor = 'white';
-                setTimeout(() => document.body.style.backgroundColor = '#050505', 100);
+                const flash = document.getElementById('flashOverlay');
+                flash.style.transition = 'opacity 0.1s';
+                flash.style.opacity = 1;
+                setTimeout(() => {
+                    flash.style.opacity = 0;
+                }, 100);
                 break;
             case 'clock':
                 const duration = 8 * (1 + (player.stats.Duration || 0) / 100);
+                timeStopEffect.active = true;
+                timeStopEffect.timer = duration;
                 enemies.active.forEach(e => e.freeze(duration));
                 break;
             case 'clover':
@@ -2614,8 +2704,9 @@ class Pickup {
         ctx.save();
         ctx.translate(this.x, this.y);
         let icon = '?';
+        let fontSize = 24;
         switch (this.type) {
-            case 'coin': icon = '🪙'; break;
+            case 'coin': icon = '🪙'; fontSize = 16; break;
             case 'coin_bag':
             case 'chest_coin_bag': icon = '💰'; break;
             case 'chest': icon = '📦'; break;
@@ -2957,18 +3048,30 @@ function update(dt){
   if(paused) return; 
   player.update(dt); 
  
+  if (timeStopEffect.active) {
+    timeStopEffect.timer -= dt;
+    if (timeStopEffect.timer <= 0) {
+        timeStopEffect.active = false;
+    }
+  }
   // Timeline-based spawning
   const minute = Math.floor(gameTime / 60);
   if (minute !== lastSpawnMinute) {
     lastSpawnMinute = minute;
     enemyLimit += 10; // Increase enemy limit every minute
     minEnemyLimit += 2; // Increase min enemy limit every minute
-    if (minute > 0 && minute % 2 === 0) {
-      const e = enemies.spawn();
-      e.type = 'ogre_boss';
-      e.spawn(player.x, player.y);
-    }
   }
+
+  hordeSpawnTimer -= dt;
+    if (hordeSpawnTimer <= 0) {
+        const hordeSize = 20 + minute * 5;
+        for (let i = 0; i < hordeSize; i++) {
+            const e = enemies.spawn();
+            e.init('ghoul');
+            e.spawnAsHordeMember();
+        }
+        hordeSpawnTimer = 20 + Math.random() * 20; // Every 20-40 seconds
+    }
 
   const spawnTypes = spawnTimeline[Math.min(minute, spawnTimeline.length - 1)];
   spawnTimer -= dt;
@@ -2982,7 +3085,7 @@ function update(dt){
     const curse = 1 + (player.stats.Curse / 100);
     spawnTimer = Math.max(0.05, 0.4 / curse - minute * 0.015); // Spawn faster over time
     const e = enemies.spawn();
-    e.type = spawnTypes[Math.floor(Math.random() * spawnTypes.length)];
+    e.init(spawnTypes[Math.floor(Math.random() * spawnTypes.length)]);
     e.spawn(player.x, player.y);
   }
 

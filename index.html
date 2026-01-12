@@ -167,6 +167,7 @@ button:active { transform:scale(0.95); }
       <button id="skipChestBtn" style="margin-top: 20px;">Skip</button>
       <button id="closeChestBtn" style="margin-top: 20px; display: none;">Claim</button>
   </div>
+    <div id="flashOverlay" style="position:absolute; top:0; left:0; width:100%; height:100%; background:white; opacity:0; pointer-events:none; z-index:999;"></div>
 </div> 
  
 <script> 
@@ -184,6 +185,7 @@ const input={up:0,down:0,left:0,right:0};
 let paused=false; 
 let dead=false; 
 let gameTime = 0; 
+let timeStopEffect = { active: false, timer: 0 };
  
 // Input handling 
 window.addEventListener("keydown",e=>{ 
@@ -276,9 +278,9 @@ class Player{
     this.invuln = 0; this.recoveryTimer=1; 
     this.x=0; this.y=0; this.r=12; 
     this.stats={ 
-      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":0,"Area":1, 
-      "Speed":1,"Duration":1,"Amount":0,"Cooldown":0,"Luck":0,"Growth":2500,"Greed":0, 
-      "Curse":0,"Magnet":1,"Revival":1 
+      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":10,"Area":2, 
+      "Speed":5,"Duration":5,"Amount":0,"Cooldown":10,"Luck":0,"Growth":10,"Greed":0, 
+      "Curse":0,"Magnet":5,"Revival":1 
     }; 
     this.hp=this.stats["Max Health"]; 
     this.maxhp=this.stats["Max Health"]; 
@@ -294,7 +296,9 @@ class Player{
     this.level=1; 
     this.xpToNext=10;
     this.coins = 0;
+    this.kills = 0;
     this.flameBreath = { active: false, timer: 0, damage: 0 };
+    this.pendingLevelUps = 0;
   } 
  
   update(dt){ 
@@ -354,14 +358,18 @@ class Player{
     const finalXP = intPart + (Math.random() < frac ? 1 : 0);
     this.xp += finalXP;
 
-    if(this.xp >= this.xpToNext){
-      this.xp -= this.xpToNext;
-      this.level++;
-      this.xpToNext = Math.floor(this.xpToNext * 1.25);
-      const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0");
-      levelUpController.onLevelUp();
+    while (this.xp >= this.xpToNext) {
+        this.xp -= this.xpToNext;
+        this.level++;
+        this.xpToNext = Math.floor(this.xpToNext * 1.25);
+        this.pendingLevelUps++;
+        const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0");
     }
-  }
+
+    if (this.pendingLevelUps > 0 && !levelUpController.showing) {
+        levelUpController.onLevelUp();
+    }
+}
  
   render(){ 
     ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.angle); 
@@ -959,19 +967,12 @@ const demonicSigils = new Pool(() => new DemonicSigilEffect(), 10);
 class Weapon{ 
   constructor(opts){ 
     // opts: { id, name, icon, baseCooldown, baseDamage, speed, duration, fireFunc, levelTable } 
-    this.id = opts.id || "w";
-    this.name = opts.name || "W";
-    this.icon = opts.icon || this.name;
-    this.baseCooldown = (opts.baseCooldown !== undefined) ? opts.baseCooldown : 1.0;
-    this.baseDamage = (opts.baseDamage !== undefined) ? opts.baseDamage : 5;
-    this.speed = (opts.speed !== undefined) ? opts.speed : 200;
-    this.duration = (opts.duration !== undefined) ? opts.duration : 1;
-    this.fireFunc = opts.fireFunc || (()=>{});
-    this.level = opts.level || 1;
-    this.maxLevel = opts.maxLevel || 8;
-    this.pierce = (opts.pierce !== undefined) ? opts.pierce : 0; // weapon-local pierce
-    this.levelTable = opts.levelTable || {}; // map level -> function to apply effect
-    this.desc = opts.desc || "";
+    const defaults = {
+        id: "w", name: "W", icon: "W", baseCooldown: 1.0, baseDamage: 5,
+        speed: 200, duration: 1, fireFunc: ()=>{}, level: 1, maxLevel: 8,
+        pierce: 0, levelTable: {}, desc: ""
+    };
+    Object.assign(this, defaults, opts);
   } 
  
   // called when player casts this weapon from slotIndex 
@@ -1291,6 +1292,8 @@ holy_wand: new Weapon({
     baseDamage: 15, // Evolved damage
     speed: 500, // Double of Wand
     duration: 1.2,
+    pierce: 1,
+    baseAmount: 4,
     fireFunc: holyWandFire,
     level: 1,
     maxLevel: 1, // Max level by default
@@ -1306,12 +1309,17 @@ const evolutionRecipes = {
     }
 };
 
+const reverseEvolutionMap = {};
+for (const baseId in evolutionRecipes) {
+    reverseEvolutionMap[evolutionRecipes[baseId].evolvedId] = baseId;
+}
+
 let thunderbolts = [];
 let novaPulses = [];
 
 function holyWandFire(playerRef, slotIndex) {
     const w = this;
-    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+    const amount = (w.baseAmount || 1) + Math.floor(playerRef.stats["Amount"] || 0);
     const mightMult = 1 + (playerRef.stats["Might"] || 0) / 100;
     const speedMult = 1 + (playerRef.stats["Speed"] || 0) / 100;
     const durationMult = 1 + (playerRef.stats["Duration"] || 0) / 100;
@@ -1321,7 +1329,7 @@ function holyWandFire(playerRef, slotIndex) {
         Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
     );
 
-    const projectileDelay = 100; // 100ms between each projectile in the sequence
+    const projectileDelay = 80;
 
     for (let i = 0; i < amount; i++) {
         setTimeout(() => {
@@ -1610,22 +1618,7 @@ function renderNovaPulses() {
     }
 }
 function cloneWeaponTemplate(template){ 
-  const opts = {
-    id: template.id,
-    name: template.name,
-    icon: template.icon,
-    baseCooldown: template.baseCooldown,
-    baseDamage: template.baseDamage,
-    speed: template.speed,
-    duration: template.duration,
-    fireFunc: template.fireFunc,
-    level: template.level,
-    maxLevel: template.maxLevel,
-    pierce: template.pierce,
-    levelTable: template.levelTable,
-    desc: template.desc
-  };
-  return new Weapon(opts);
+  return new Weapon({...template});
 } 
  
 // ------------------- STAT METADATA ------------------- 
@@ -1668,11 +1661,26 @@ const levelUpController = {
       }
     }
 
-    // weapon pool: include both weapons the player already has (upgrade candidates) and weapons not owned yet (new)
     const weaponPool = [];
+    const ownedBaseWeaponsFromEvolutions = new Set();
+    for (const w of player.weaponSlots) {
+        if (w && w.isEvolved) {
+            const baseId = reverseEvolutionMap[w.id];
+            if (baseId) {
+                ownedBaseWeaponsFromEvolutions.add(baseId);
+            }
+        }
+    }
+
     for(const k in weaponsCatalog){
       const template = weaponsCatalog[k];
-      // detect if player owns an instance of this weapon
+      if (template.isEvolved) {
+        continue;
+      }
+      if (ownedBaseWeaponsFromEvolutions.has(template.id)) {
+          continue;
+      }
+
       let foundIndex = -1;
       for(let i=0;i<player.weaponSlots.length;i++){
         const w = player.weaponSlots[i];
@@ -1684,7 +1692,6 @@ const levelUpController = {
           weaponPool.push({ type:"weapon", item:ownedWeapon, owned:true, slotIndex:foundIndex });
         }
       } else {
-        // player doesn't have this weapon: offer as new if there is a free weapon slot
         const freeWeaponSlots = player.weaponSlots.filter(s=>!s).length;
         if(freeWeaponSlots > 0){
           weaponPool.push({ type:"weapon_new", item:template, owned:false });
@@ -1740,11 +1747,16 @@ const levelUpController = {
     }).filter(x=>x); 
   }, 
  
-  onLevelUp(){
-    const choices = this.pickChoices();
-    if(choices.length === 0) return;
-    this.showChoices(choices);
-  },
+  onLevelUp(){ 
+    if (player.pendingLevelUps > 0) {
+        const choices = this.pickChoices();
+        if(choices.length === 0) {
+            player.pendingLevelUps = 0; // No more upgrades, clear pending
+            return;
+        }
+        this.showChoices(choices);
+    }
+  }, 
  
   showChoices(choices){ 
     audioManager.play('level_up');
@@ -1799,14 +1811,19 @@ const levelUpController = {
   }, 
  
   hideChoices(){
-    this.showing=false;
-    const el=document.getElementById("levelUpScreen");
-    el.style.display="none"; el.setAttribute("aria-hidden","true");
-    paused=false;
-    updatePassiveSlotsUI(); updateInventoryUI();
+    if (player.pendingLevelUps > 0) {
+        this.onLevelUp();
+    } else {
+        this.showing=false;
+        const el=document.getElementById("levelUpScreen");
+        el.style.display="none"; el.setAttribute("aria-hidden","true");
+        paused=false;
+        updatePassiveSlotsUI(); updateInventoryUI();
+    }
   },
  
   applyChoice(choice){ 
+    player.pendingLevelUps--;
     if(choice.kind === "passive"){ 
       const p = passiveMap[choice.data.id]; if(!p) return; 
       const lvl = player.passiveLevels[p.id]||0; 
@@ -1934,8 +1951,7 @@ const chestController = {
                 const randIndex = Math.floor(Math.random() * possibleUpgrades.length);
                 rewards.push(possibleUpgrades.splice(randIndex, 1)[0]);
             } else {
-                const greed = 1 + (player.stats.Greed / 100);
-                rewards.push({ type: 'gold', amount: Math.floor((100 + Math.random() * 400) * greed) });
+                rewards.push({ type: 'chest_coin_bag' });
             }
         }
         return rewards;
@@ -1997,13 +2013,11 @@ const chestController = {
         clearInterval(interval);
         
         const reward = this.rewards[index];
-        let rewardIcon = '💰'; // Default to coin
+        let rewardIcon = '💰';
         if (reward.type === 'evolution') {
             const evolvedWeapon = weaponsCatalog[reward.recipe.evolvedId];
-            if (evolvedWeapon) {
-                rewardIcon = evolvedWeapon.icon;
-            }
-        } else if (reward.id && reward.icon) { // Weapon or Passive
+            rewardIcon = evolvedWeapon.icon;
+        } else if (reward.id) {
             rewardIcon = reward.icon;
         }
 
@@ -2050,10 +2064,12 @@ const chestController = {
                 icon.textContent = evolvedWeapon.icon;
                 title.textContent = evolvedWeapon.name;
                 card.style.borderColor = 'gold'; // Special border for evolution
-            } else if (reward.type === 'gold') {
+            } else if (reward.type === 'chest_coin_bag') {
+                const greed = 1 + (player.stats.Greed / 100);
+                const amount = Math.floor(25 * greed);
+                player.coins += amount;
                 icon.textContent = '💰';
-                title.textContent = `Gold x${reward.amount}`;
-                player.coins += reward.amount;
+                title.textContent = `Gold x${amount}`;
             } else if (reward.id) { // Weapon or Passive
                 if (reward.fireFunc) { // Weapon
                     const weapon = player.weaponSlots.find(w => w && w.id === reward.id);
@@ -2220,184 +2236,227 @@ function randPickAndRemove(arr){ const idx = Math.floor(Math.random()*arr.length
 function shuffleArray(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; } 
 // ------------------- Enemy types & enemy pool ------------------- 
 const EnemyTypes={ 
-    goblin:{hp:6,dmg:6,armor:1,speed:80,size:12,xpValue:0.8, color: '#8fbc8f'}, 
-    orc:{hp:60,dmg:9,armor:3,speed:60,size:18,xpValue:2.5, color: '#d2691e'},
-    bat:{hp:4,dmg:5,armor:0,speed:120,size:8,xpValue:0.5, color: '#a9a9a9'},
-    skeleton:{hp:25,dmg:10,armor:2,speed:70,size:14,xpValue:1.5, color: '#f5f5dc'},
-    golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
-    ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
-    sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
-    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'}
+    goblin:{hp:3,dmg:6,armor:1,speed:80,size:12,xpValue:0.9, color: '#8fbc8f'}, 
+    orc:{hp:15,dmg:9,armor:3,speed:60,size:18,xpValue:6.5, color: '#d2691e'},
+    bat:{hp:2,dmg:5,armor:0,speed:120,size:8,xpValue:0.6, color: '#a9a9a9'},
+    skeleton:{hp:9,dmg:10,armor:2,speed:70,size:14,xpValue:5.5, color: '#f5f5dc'},
+    golem:{hp:30,dmg:12,armor:5,speed:40,size:24,xpValue:15, color: '#708090'},
+    ogre_boss:{hp:180,dmg:15,armor:10,speed:50,size:32,xpValue:53, isBoss: true, color: '#dc143c'},
+    sprinter: {hp: 6, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 2.8, color: '#add8e6'},
+    tank: {hp: 80, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 13, color: '#a52a2a'},
+    banshee: {hp: 40, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 5, color: '#e0ffff'},
+    lich: {hp: 60, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 24, isBoss: true, color: '#9370db'},
+    gargoyle: {hp: 100, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 17, color: '#696969'},
+    doomknight: {hp: 1000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 170, isBoss: true, color: '#4b0082'},
+    ghoul: {hp: 4, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.8, color: '#556b2f', isHorde: true},
 }; 
  
-class Enemy { 
-  constructor(type = "goblin") { 
-    this.type = type; 
-    const t = EnemyTypes[type]; 
- 
-    // Core stats 
-    this.maxhp = t.hp; 
-    this.hp = t.hp; 
-    this.dmg = t.dmg; 
-    this.armor = t.armor; 
-    this.baseSpd = t.speed; 
-    this.r = t.size; 
- 
-    // Position 
-    this.x = 0; 
-    this.y = 0; 
- 
-    // Hit feedback & debuffs 
-    this.hitFlash = 0;     // visual flash timer (seconds) 
-    this.slowTimer = 0;    // slow duration 
-    this.slowFactor = 1;   // movement multiplier 
+class Enemy {
+    constructor() {
+        this.init('goblin');
+    }
 
-    // Hurricane properties
-    this.isOrbiting = false;
-    this.orbitAngle = 0;
-    this.orbitDist = 0;
-    this.orbitDuration = 0;
-    this.orbitSpeed = 0;
-    this.isPullingToOrbit = false;
-    this.pullToOrbitTimer = 0;
-    this.orbitTrail = [];
-  } 
- 
-  spawn(px, py) { 
-    const ang = Math.random() * Math.PI * 2; 
-    const dist = 400 + Math.random() * 300; 
-    this.x = px + Math.cos(ang) * dist; 
-    this.y = py + Math.sin(ang) * dist; 
- 
-    const curse = 1 + (player.stats.Curse / 100);
-    const minute = Math.floor(gameTime / 60);
-    const hpTimeScaling = 1 + minute * 0.25; // +25% HP per minute
-    const dmgTimeScaling = 1 + minute * 0.05; // +5% DMG per minute
+    init(type) {
+        this.type = type;
+        const t = EnemyTypes[type];
 
-    this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 10 : 1);
-    this.dmg = this.dmg * curse * dmgTimeScaling;
-    this.hitFlash = 0; 
-    this.slowTimer = 0; 
-    this.slowFactor = 1;
-    this.isOrbiting = false;
-    this.isPullingToOrbit = false;
-    this.orbitTrail = [];
-  } 
- 
-  update(dt) { 
-    if (paused || dead) return; 
+        this.maxhp = t.hp;
+        this.hp = t.hp;
+        this.dmg = t.dmg;
+        this.armor = t.armor;
+        this.baseSpd = t.speed;
+        this.r = t.size;
+        this.isHordeEnemy = t.isHorde || false;
 
-    if (this.isPullingToOrbit) {
-        this.pullToOrbitTimer -= dt;
-        const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-        const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
-        this.x += (targetX - this.x) * 0.1;
-        this.y += (targetY - this.y) * 0.1;
+        this.x = 0; this.y = 0;
+        this.hordeVx = 0; this.hordeVy = 0;
 
-        if (this.pullToOrbitTimer <= 0) {
-            this.isPullingToOrbit = false;
-            this.isOrbiting = true;
+        this.hitFlash = 0;
+        this.slowTimer = 0;
+        this.slowFactor = 1;
+        this.isFrozen = false;
+        this.freezeTimer = 0;
+
+        this.isOrbiting = false;
+        this.orbitAngle = 0;
+        this.orbitDist = 0;
+        this.orbitDuration = 0;
+        this.orbitSpeed = 0;
+        this.isPullingToOrbit = false;
+        this.pullToOrbitTimer = 0;
+        this.orbitTrail = [];
+    }
+
+    freeze(duration) {
+        this.isFrozen = true;
+        this.freezeTimer = duration;
+    }
+
+    spawn(px, py) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 400 + Math.random() * 300;
+        this.x = px + Math.cos(ang) * dist;
+        this.y = py + Math.sin(ang) * dist;
+        this.applySpawnScaling();
+    }
+
+    spawnAsHordeMember(spawnX, spawnY, vx, vy) {
+        const spread = 80;
+        this.x = spawnX + (Math.random() - 0.5) * spread;
+        this.y = spawnY + (Math.random() - 0.5) * spread;
+        this.hordeVx = vx;
+        this.hordeVy = vy;
+        this.applySpawnScaling();
+    }
+
+    applySpawnScaling() {
+        const curse = 1 + (player.stats.Curse / 100);
+        const minute = Math.floor(gameTime / 60);
+        const hpTimeScaling = 1 + minute/10 * (this.isHordeEnemy ? 0.15 : 0.25);
+        const dmgTimeScaling = 1 + minute/20;
+
+        this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 5 : 1);
+        this.dmg = this.dmg * curse * dmgTimeScaling;
+
+        if (timeStopEffect.active) {
+            this.freeze(timeStopEffect.timer);
         }
+    }
+
+    update(dt) {
+    if (paused || dead) return;
+
+    // ----- Death Check -----
+    if (this.hp <= 0) {
+        dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
+        const luck = 1 + (player.stats.Luck / 100);
+        if (Math.random() < 0.01 * luck) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'coin');
+        }
+        if (EnemyTypes[this.type].isBoss) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'chest');
+        }
+        player.kills++;
+        enemies.recycle(this);
         return;
     }
 
-    if (this.isOrbiting) {
-        this.orbitAngle += 3 * this.orbitSpeed * dt;
-        this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-        this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+    // ----- Visuals & Timers -----
+    if (this.hitFlash > 0) {
+        this.hitFlash -= dt;
+        if (this.hitFlash < 0) this.hitFlash = 0;
+    }
 
-        this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
-        for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
-            this.orbitTrail[i].life -= dt;
-            if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
+    if (this.isFrozen) {
+        this.freezeTimer -= dt;
+        if (this.freezeTimer <= 0) {
+            this.isFrozen = false;
+        }
+    }
+
+    // ----- Movement & Collision (only if not frozen) -----
+    if (!this.isFrozen) {
+        if (this.isPullingToOrbit) {
+            this.pullToOrbitTimer -= dt;
+            const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
+            const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+            this.x += (targetX - this.x) * 0.1;
+            this.y += (targetY - this.y) * 0.1;
+
+            if (this.pullToOrbitTimer <= 0) {
+                this.isPullingToOrbit = false;
+                this.isOrbiting = true;
+            }
+            return;
+        }
+
+        if (this.isOrbiting) {
+            this.orbitAngle += 3 * this.orbitSpeed * dt;
+            this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
+            this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+
+            this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
+            for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
+                this.orbitTrail[i].life -= dt;
+                if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
+            }
+
+            for (const e of enemies.active) {
+                if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
+                    const finalDmg = Math.max(1, this.orbitDamage - e.armor);
+                    e.hp -= finalDmg;
+                    e.hitFlash = 0.2;
+                const h = hitmarks.spawn(); h.spawn(e.x, e.y, finalDmg, "#add8e6");
+                }
+            }
+
+            for (const b of breakables.active) {
+                if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
+                    b.destroy();
+                }
+            }
+
+            this.orbitDuration -= dt;
+            if (this.orbitDuration <= 0) {
+                this.isOrbiting = false;
+                const finalDmg = Math.max(1, this.orbitDamage * 2);
+                this.hp -= finalDmg;
+                this.hitFlash = 0.5;
+            }
+            return;
+        }
+
+        if (this.slowTimer > 0) {
+            this.slowTimer -= dt;
+            if (this.slowTimer <= 0) {
+                this.slowFactor = 1;
+            }
+        }
+
+        if (this.isHordeEnemy) {
+            const effectiveSpeed = this.baseSpd * this.slowFactor;
+            this.x += this.hordeVx * effectiveSpeed * dt;
+            this.y += this.hordeVy * effectiveSpeed * dt;
+
+            const despawnRange = 200;
+            if (this.x < camera.x - despawnRange || this.x > camera.x + canvas.width + despawnRange ||
+                this.y < camera.y - despawnRange || this.y > camera.y + canvas.height + despawnRange) {
+                enemies.recycle(this);
+                return;
+            }
+        } else {
+            const dx = player.x - this.x;
+            const dy = player.y - this.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const effectiveSpeed = this.baseSpd * this.slowFactor;
+            this.x += (dx / d) * effectiveSpeed * dt;
+            this.y += (dy / d) * effectiveSpeed * dt;
         }
 
         for (const e of enemies.active) {
-            if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
-                const finalDmg = Math.max(1, this.orbitDamage - e.armor);
-                e.hp -= finalDmg;
-                e.hitFlash = 0.2;
+            if (e === this) continue;
+            const dx2 = e.x - this.x;
+            const dy2 = e.y - this.y;
+            const dist = Math.hypot(dx2, dy2);
+            if (dist < e.r + this.r && dist > 0) {
+                const push = 0.5 * (e.r + this.r - dist) / dist;
+                this.x -= dx2 * push;
+                this.y -= dy2 * push;
             }
         }
 
-        for (const b of breakables.active) {
-            if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
-                b.destroy();
-            }
+        if (Math.hypot(player.x - this.x, player.y - this.y) < this.r + player.r && player.invuln <= 0) {
+            const damage = Math.max(1, this.dmg - player.stats.Armor);
+            player.hp -= damage;
+            player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow);
+            player.invuln = 0.2;
+            const h = hitmarks.spawn();
+            h.spawn(this.x, this.y, damage, "#f00");
         }
-
-        this.orbitDuration -= dt;
-        if (this.orbitDuration <= 0) {
-            this.isOrbiting = false;
-            const finalDmg = Math.max(1, this.orbitDamage * 2); // Final damage burst
-            this.hp -= finalDmg;
-            this.hitFlash = 0.5;
-        }
-        return; // Skip normal behavior
     }
- 
-    // ----- Hit flash decay (FIXED: dt belongs here) ----- 
-    if (this.hitFlash > 0) { 
-      this.hitFlash -= dt; 
-      if (this.hitFlash < 0) this.hitFlash = 0; 
-    } 
- 
-    // ----- Slow decay ----- 
-    if (this.slowTimer > 0) { 
-      this.slowTimer -= dt; 
-      if (this.slowTimer <= 0) { 
-        this.slowFactor = 1; 
-      } 
-    } 
- 
-    // ----- Movement ----- 
-    const dx = player.x - this.x; 
-    const dy = player.y - this.y; 
-    const d = Math.hypot(dx, dy) || 1; 
- 
-    const effectiveSpeed = this.baseSpd * this.slowFactor; 
-    this.x += (dx / d) * effectiveSpeed * dt; 
-    this.y += (dy / d) * effectiveSpeed * dt; 
- 
-    // ----- Separation ----- 
-    for (const e of enemies.active) { 
-      if (e === this) continue; 
-      const dx2 = e.x - this.x; 
-      const dy2 = e.y - this.y; 
-      const dist = Math.hypot(dx2, dy2); 
-      if (dist < e.r + this.r && dist > 0) { 
-        const push = 0.5 * (e.r + this.r - dist) / dist; 
-        this.x -= dx2 * push; 
-        this.y -= dy2 * push; 
-      } 
-    } 
- 
-    // ----- Player collision damage ----- 
-    if (d < this.r + player.r && player.invuln <= 0) { 
-      const damage = Math.max(1, this.dmg - player.stats.Armor);
-      player.hp -= damage; 
-      player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow); 
-      player.invuln = 0.2; 
- 
-      const h = hitmarks.spawn(); 
-      h.spawn(this.x, this.y, damage, "#f00"); 
-    } 
- 
-    // ----- Death ----- 
-    if (this.hp <= 0) { 
-      dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
-      const luck = 1 + (player.stats.Luck / 100);
-      if (Math.random() < 0.01 * luck) {
-        const p = pickups.spawn();
-        p.spawn(this.x, this.y, 'coin');
-      }
-      if (EnemyTypes[this.type].isBoss) {
-        const p = pickups.spawn();
-        p.spawn(this.x, this.y, 'chest');
-      }
-      enemies.recycle(this); 
-    } 
-  } 
+}
  
   render() { 
     if (this.isOrbiting) {
@@ -2408,19 +2467,27 @@ class Enemy {
             ctx.fill();
         }
     }
-    ctx.fillStyle = this.hitFlash > 0 ? "#fff" : EnemyTypes[this.type].color;
+    ctx.fillStyle = this.hitFlash > 0 ? "#fff" : (this.isFrozen ? "#add8e6" : EnemyTypes[this.type].color);
     ctx.beginPath(); 
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2); 
     ctx.fill(); 
+    if (this.isFrozen) {
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
   } 
 } 
  
  
-const enemies = new Pool(()=>new Enemy(),500); 
+const enemies = new Pool(()=>new Enemy(), 800);
 let spawnTimer = 0;
 let lastSpawnMinute = -1;
 let enemyLimit = 50;
 let minEnemyLimit = 6;
+
+let hordeSpawnTimer = 30;
+let nextBossSpawnTime = 120;
 
 const spawnTimeline = [
     ['goblin'], // 0-1 min
@@ -2432,7 +2499,18 @@ const spawnTimeline = [
     ['golem', 'sprinter'], // 6-7 min
     ['golem', 'tank'],       // 7-8 min
     ['sprinter', 'tank', 'orc', 'skeleton'], // 8-9 min
-    ['golem', 'ogre_boss'] // 9-10 min
+    ['golem', 'ogre_boss'], // 9-10 min
+    ['banshee', 'golem'], // 10-12 min
+    ['banshee', 'sprinter', 'tank'], // 12-14 min
+    ['gargoyle', 'orc', 'skeleton'], // 14-16 min
+    ['gargoyle', 'lich'], // 16-18 min
+    ['banshee', 'gargoyle', 'sprinter'], // 18-20 min
+    ['doomknight'], // 20-22 min
+    ['lich', 'banshee', 'golem'], // 22-24 min
+    ['gargoyle', 'tank', 'sprinter', 'orc'], // 24-26 min
+    ['doomknight', 'lich'], // 26-28 min
+    ['banshee', 'gargoyle', 'golem', 'tank'], // 28-30 min
+    ['doomknight', 'lich', 'ogre_boss'], // 30+ min
 ];
  
 // ------------------- XP crystals (magnet rework applied) ------------------- 
@@ -2507,7 +2585,7 @@ class Pickup {
         this.active = false;
         this.x = 0;
         this.y = 0;
-        this.type = 'coin'; // e.g., 'coin', 'magnet', 'chest', 'floor_chicken'
+        this.type = 'coin';
         this.magnetized = false;
         this.speed = 0;
     }
@@ -2546,21 +2624,53 @@ class Pickup {
 
     collect() {
         audioManager.play('pickup');
-        if (this.type === 'coin') {
-            const greed = 1 + (player.stats.Greed / 100);
-            player.coins += Math.floor(1 * greed);
-        } else if (this.type === 'chest') {
-            chestController.openChest();
-        } else if (this.type === 'magnet') {
-            for (const c of xpCrystals.active) {
-                c.pull = true;
-            }
-        } else if (this.type === 'floor_chicken') {
-            player.hp = Math.min(player.maxhp, player.hp + 30);
-        } else if (this.type === 'flame_breath') {
-            player.flameBreath.active = true;
-            player.flameBreath.timer = 8 * (1 + (player.stats.Duration || 0) / 100);
-            player.flameBreath.damage = 10 * (1 + (player.stats.Might || 0) / 100);
+        const greed = 1 + (player.stats.Greed / 100);
+        switch (this.type) {
+            case 'coin':
+                player.coins += Math.floor(1 * greed);
+                break;
+            case 'coin_bag':
+                player.coins += Math.floor(10 * greed);
+                break;
+            case 'chest_coin_bag':
+                player.coins += Math.floor(25 * greed);
+                break;
+            case 'chest':
+                chestController.openChest();
+                break;
+            case 'magnet':
+                for (const c of xpCrystals.active) c.pull = true;
+                break;
+            case 'floor_chicken':
+                player.hp = Math.min(player.maxhp, player.hp + 30);
+                break;
+            case 'flame_breath':
+                player.flameBreath.active = true;
+                player.flameBreath.timer = 8 * (1 + (player.stats.Duration || 0) / 100);
+                player.flameBreath.damage = 10 * (1 + (player.stats.Might || 0) / 100);
+                break;
+            case 'sun':
+                enemies.active.forEach(e => {
+                    if (!EnemyTypes[e.type].isBoss) e.hp = 0;
+                });
+                const flash = document.getElementById('flashOverlay');
+                flash.style.transition = 'opacity 0.1s';
+                flash.style.opacity = 1;
+                setTimeout(() => {
+                    flash.style.opacity = 0;
+                }, 100);
+                break;
+            case 'clock':
+                const duration = 8 * (1 + (player.stats.Duration || 0) / 100);
+                timeStopEffect.active = true;
+                timeStopEffect.timer = duration;
+                enemies.active.forEach(e => e.freeze(duration));
+                break;
+            case 'clover':
+                player.stats.Luck += 10;
+                const h = hitmarks.spawn();
+                h.spawn(player.x, player.y - 20, "Luck +10", "#0f0");
+                break;
         }
     }
 
@@ -2569,12 +2679,18 @@ class Pickup {
         ctx.save();
         ctx.translate(this.x, this.y);
         let icon = '?';
+        let fontSize = 24;
         switch (this.type) {
-            case 'coin': icon = '💰'; break;
+            case 'coin': icon = '🪙'; fontSize = 16; break;
+            case 'coin_bag':
+            case 'chest_coin_bag': icon = '💰'; break;
             case 'chest': icon = '📦'; break;
             case 'magnet': icon = '🧲'; break;
             case 'floor_chicken': icon = '🍗'; break;
             case 'flame_breath': icon = '🔥'; break;
+            case 'sun': icon = '🔆'; break;
+            case 'clock': icon = '🕒'; break;
+            case 'clover': icon = '🍀'; break;
         }
         ctx.font = '24px serif';
         ctx.fillText(icon, -12, 12);
@@ -2625,6 +2741,7 @@ class FlameParticle {
                 const finalDmg = Math.max(1, this.damage - e.armor);
                 e.hp -= finalDmg;
                 this.hitEnemies.add(e);
+                const h = hitmarks.spawn(); h.spawn(e.x, e.y, finalDmg, "#ff4500");
             }
         }
 
@@ -2731,20 +2848,27 @@ class Breakable {
     }
 
     destroy() {
+        const luck = 1 + (player.stats.Luck / 100);
         const rand = Math.random();
-        if (rand < 0.2) {
-            const p = pickups.spawn();
-            p.spawn(this.x, this.y, 'coin');
-        } else if (rand < 0.25) {
-            const p = pickups.spawn();
-            p.spawn(this.x, this.y, 'floor_chicken');
-        } else if (rand < 0.27) {
-            const p = pickups.spawn();
-            p.spawn(this.x, this.y, 'magnet');
-        } else if (rand < 0.3) {
-            const p = pickups.spawn();
-            p.spawn(this.x, this.y, 'flame_breath');
+
+        if (rand < 0.01 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'sun');
+        } else if (rand < 0.03 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'clock');
+        } else if (rand < 0.06 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'clover');
+        } else if (rand < 0.15 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'coin_bag');
+        } else if (rand < 0.4 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'coin');
+        } else if (rand < 0.5 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'floor_chicken');
+        } else if (rand < 0.55 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'magnet');
+        } else if (rand < 0.6 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'flame_breath');
         }
+
         this.active = false;
         breakables.recycle(this);
     }
@@ -2875,7 +2999,7 @@ const camera = { x:0, y:0, shake:0 };
  
 function renderHUD(){ 
   const statEl = document.getElementById("stats"); 
-  if(statEl) statEl.innerText = `Kills: 0  |  Time: ${Math.floor(gameTime/60)}:${(Math.floor(gameTime)%60).toString().padStart(2,'0')} | Coins: ${player.coins}`;
+  if(statEl) statEl.innerText = `Kills: ${player.kills}  |  Time: ${Math.floor(gameTime/60)}:${(Math.floor(gameTime)%60).toString().padStart(2,'0')} | Coins: ${player.coins}`;
  
   // HP Bar 
   const w = 250, h = 16, pad = 20; 
@@ -2900,18 +3024,82 @@ function update(dt){
   if(paused) return; 
   player.update(dt); 
  
+  if (timeStopEffect.active) {
+    timeStopEffect.timer -= dt;
+    if (timeStopEffect.timer <= 0) {
+        timeStopEffect.active = false;
+    }
+  }
   // Timeline-based spawning
   const minute = Math.floor(gameTime / 60);
   if (minute !== lastSpawnMinute) {
     lastSpawnMinute = minute;
     enemyLimit += 10; // Increase enemy limit every minute
     minEnemyLimit += 2; // Increase min enemy limit every minute
-    if (minute > 0 && minute % 2 === 0) {
-      const e = enemies.spawn();
-      e.type = 'ogre_boss';
-      e.spawn(player.x, player.y);
-    }
   }
+
+  hordeSpawnTimer -= dt;
+    if (hordeSpawnTimer <= 0) {
+        const hordeSize = 20 + minute * 5;
+        const corner = Math.floor(Math.random() * 4);
+        const margin = 100;
+        let spawnX, spawnY, targetX, targetY;
+
+        switch (corner) {
+            case 0: // Top-left
+                spawnX = camera.x - margin;
+                spawnY = camera.y - margin;
+                targetX = camera.x + canvas.width + margin;
+                targetY = camera.y + canvas.height + margin;
+                break;
+            case 1: // Top-right
+                spawnX = camera.x + canvas.width + margin;
+                spawnY = camera.y - margin;
+                targetX = camera.x - margin;
+                targetY = camera.y + canvas.height + margin;
+                break;
+            case 2: // Bottom-left
+                spawnX = camera.x - margin;
+                spawnY = camera.y + canvas.height + margin;
+                targetX = camera.x + canvas.width + margin;
+                targetY = camera.y - margin;
+                break;
+            case 3: // Bottom-right
+                spawnX = camera.x + canvas.width + margin;
+                spawnY = camera.y + canvas.height + margin;
+                targetX = camera.x - margin;
+                targetY = camera.y - margin;
+                break;
+        }
+
+        const dx = targetX - spawnX;
+        const dy = targetY - spawnY;
+        const d = Math.hypot(dx, dy) || 1;
+        const vx = dx / d;
+        const vy = dy / d;
+
+        for (let i = 0; i < hordeSize; i++) {
+            const e = enemies.spawn();
+            e.init('ghoul');
+            e.spawnAsHordeMember(spawnX, spawnY, vx, vy);
+        }
+        hordeSpawnTimer = 20 + Math.random() * 20; // Every 20-40 seconds
+    }
+
+    if (gameTime >= nextBossSpawnTime) {
+        let bossType = 'ogre_boss';
+        if (minute >= 20) {
+            bossType = 'doomknight';
+        } else if (minute >= 10) {
+            bossType = 'lich';
+        }
+
+        const e = enemies.spawn();
+        e.init(bossType);
+        e.spawn(player.x, player.y);
+
+        nextBossSpawnTime += 120;
+    }
 
   const spawnTypes = spawnTimeline[Math.min(minute, spawnTimeline.length - 1)];
   spawnTimer -= dt;
@@ -2925,7 +3113,7 @@ function update(dt){
     const curse = 1 + (player.stats.Curse / 100);
     spawnTimer = Math.max(0.05, 0.4 / curse - minute * 0.015); // Spawn faster over time
     const e = enemies.spawn();
-    e.type = spawnTypes[Math.floor(Math.random() * spawnTypes.length)];
+    e.init(spawnTypes[Math.floor(Math.random() * spawnTypes.length)]);
     e.spawn(player.x, player.y);
   }
 

@@ -124,6 +124,46 @@ button:active { transform:scale(0.95); }
  
 /* --- Additional small style fallbacks for old UI --- */ 
 .weaponSlots, .passiveSlots{ display:none; } /* keep hidden (we update DOM bars instead) */ 
+
+/* --- CONSOLE STYLES --- */
+#console {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 50%;
+    height: 300px;
+    background: rgba(20, 20, 20, 0.8);
+    border-top: 2px solid #333;
+    display: none;
+    flex-direction: column;
+    font-family: monospace;
+    color: #eee;
+    z-index: 200;
+    pointer-events: auto;
+}
+#consoleOutput {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+#consoleInput {
+    border: none;
+    background: #111;
+    padding: 10px;
+    color: #eee;
+    font-family: monospace;
+    font-size: 14px;
+    outline: none;
+    border-top: 2px solid #333;
+}
+.log-error { color: #ff6b6b; }
+.log-success { color: #6bff94; }
+.log-info { color: #6b94ff; }
+.autocomplete-suggestion {
+    color: #888;
+}
  
 </style> 
 </head> 
@@ -131,7 +171,14 @@ button:active { transform:scale(0.95); }
  
 <canvas id="gameCanvas"></canvas> 
  
-<div id="uiLayer"> 
+<div id="uiLayer">
+    <div id="console">
+        <div id="consoleOutput"></div>
+        <div style="position: relative;">
+            <input type="text" id="consoleInput" placeholder="Enter command..." autocomplete="off" />
+            <span id="autocompleteSuggestion" style="position: absolute; left: 10px; top: 10px; color: #555; pointer-events: none;"></span>
+        </div>
+    </div>
   <div id="stats"></div> 
  
   <div class="bar-container hud-element" id="weaponBar"></div> 
@@ -195,11 +242,25 @@ window.addEventListener("keydown",e=>{
   if(k==="s" || e.key==="ArrowDown") input.down = 1; 
   if(k==="a" || e.key==="ArrowLeft") input.left = 1; 
   if(k==="d" || e.key==="ArrowRight") input.right = 1; 
-  if(k==="p" || k==="Escape" || k===" "){ 
+  if(k==="p" || k==="Escape" || k===" "){
+    const consoleInput = document.getElementById('consoleInput');
+    if (document.activeElement === consoleInput) return;
+
     const levelEl = document.getElementById("levelUpScreen"); 
     if(levelEl.style.display === "flex") return; 
     togglePause(); 
-  } 
+  }
+    if (e.key === '`') {
+        e.preventDefault();
+        const consoleEl = document.getElementById('console');
+        const consoleInput = document.getElementById('consoleInput');
+        const isVisible = consoleEl.style.display === 'flex';
+        consoleEl.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            consoleInput.focus();
+        }
+        paused = !isVisible;
+    }
 }); 
 window.addEventListener("keyup",e=>{ 
   if(e.key==="w" || e.key==="ArrowUp") input.up = 0; 
@@ -278,9 +339,9 @@ class Player{
     this.invuln = 0; this.recoveryTimer=1; 
     this.x=0; this.y=0; this.r=12; 
     this.stats={ 
-      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":10,"Area":2, 
-      "Speed":5,"Duration":5,"Amount":0,"Cooldown":10,"Luck":0,"Growth":10,"Greed":0, 
-      "Curse":0,"Magnet":5,"Revival":1 
+      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":0,"Area":1,
+      "Speed":1,"Duration":1,"Amount":0,"Cooldown":0,"Luck":0,"Growth":2500,"Greed":0,
+      "Curse":0,"Magnet":1,"Revival":1
     }; 
     this.hp=this.stats["Max Health"]; 
     this.maxhp=this.stats["Max Health"]; 
@@ -612,7 +673,7 @@ class CrossProjectile {
                 const finalDmg = Math.max(1, this.damage - e.armor);
                 e.hp -= finalDmg;
                 const h = hitmarks.spawn();
-                h.spawn(e.x, e.y, finalDmg, "#ffffff");
+                h.spawn(e.x, e.y, finalDmg, "#C0C0C0");
                 this.hitEnemies.add(e);
                 // No pierce countdown, it's infinite
             }
@@ -847,11 +908,13 @@ class DemonicSigilEffect {
         this.slowFactor = 0.5;
     }
 
-    spawn(x, y, radius, damage) {
+    spawn(x, y, radius, damage, drawingDuration, activeDuration) {
         this.x = x;
         this.y = y;
         this.radius = radius;
         this.damage = damage;
+        this.drawingDuration = drawingDuration;
+        this.activeDuration = activeDuration;
         this.active = true;
         this.elapsed = 0;
         this.state = 'drawing';
@@ -880,10 +943,10 @@ class DemonicSigilEffect {
                     if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
                         const finalDmg = Math.max(1, this.damage - e.armor);
                         e.hp -= finalDmg;
-                        e.slowFactor = this.slowFactor;
-                        e.slowTimer = 0.3;
                         const h = hitmarks.spawn();
                         h.spawn(e.x, e.y, finalDmg, "#ff4500");
+                        e.slowFactor = this.slowFactor;
+                        e.slowTimer = 0.3;
                     }
                 }
             }
@@ -1200,26 +1263,6 @@ cross: new Weapon({
         8: w => { w.baseDamage += 10; }
     }
 }),
-hurricane: new Weapon({
-    id: "hurricane",
-    name: "Hurricane",
-    icon: "🌪️",
-    baseCooldown: 5.0,
-    baseDamage: 10,
-    fireFunc: hurricaneFire,
-    level: 1,
-    maxLevel: 8,
-    desc: "Pulls a random enemy into a damaging orbit around you.",
-    levelTable: {
-        2: w => { w.amount = (w.amount || 1) + 1; },
-        3: w => { w.baseArea = (w.baseArea || 1) * 1.2; w.baseDamage += 5; },
-        4: w => { w.duration = (w.duration || 3) + 1; },
-        5: w => { w.amount = (w.amount || 1) + 1; },
-        6: w => { w.speed = (w.speed || 1) * 1.3; w.baseDamage += 5; },
-        7: w => { w.duration = (w.duration || 3) + 1; },
-        8: w => { w.amount = (w.amount || 1) + 1; }
-    }
-}),
 fire_wand: new Weapon({
     id: "fire_wand",
     name: "Fire Wand",
@@ -1361,9 +1404,18 @@ function demonicSigilFire(playerRef, slotIndex) {
     const mightBonus = 1 + (playerRef.stats.Might / 100);
     const curseBonus = 1 + (playerRef.stats.Curse / 100);
     const damage = w.baseDamage * mightBonus * curseBonus;
-    
+
+    const speedBonus = 1 + (playerRef.stats.Speed / 100);
+    const durationBonus = 1 + (playerRef.stats.Duration / 100);
+
+    const baseDrawingDuration = 10;
+    const baseActiveDuration = 1.4;
+
+    const finalDrawingDuration = baseDrawingDuration / speedBonus;
+    const finalActiveDuration = baseActiveDuration * durationBonus;
+
     const sigil = demonicSigils.spawn();
-    sigil.spawn(playerRef.x, playerRef.y, 150 * area, damage);
+    sigil.spawn(playerRef.x, playerRef.y, 150 * area, damage, finalDrawingDuration, finalActiveDuration);
 }
 
 function renderSwordSlash(effect) {
@@ -1443,31 +1495,6 @@ function fireWandFire(playerRef, slotIndex) {
             const angle = startAngle + i * angleStep;
             const p = fireballs.spawn();
             p.spawn(playerRef.x, playerRef.y, angle, speed, duration, damage);
-        }
-    }
-}
-
-function hurricaneFire(playerRef, slotIndex) {
-    const w = this;
-    const amount = (w.amount || 1) + Math.floor(playerRef.stats["Amount"] || 0);
-    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
-    const duration = (w.duration || 3) * (1 + (playerRef.stats.Duration || 0) / 100);
-    const speed = (w.speed || 1) * (1 + (playerRef.stats.Speed || 0) / 100);
-
-    const availableEnemies = enemies.active.filter(e => !e.isOrbiting && !e.isPullingToOrbit && !EnemyTypes[e.type].isBoss);
-    for (let i = 0; i < amount; i++) {
-        if (availableEnemies.length > 0) {
-            const randIndex = Math.floor(Math.random() * availableEnemies.length);
-            const enemy = availableEnemies.splice(randIndex, 1)[0];
-            
-            enemy.isPullingToOrbit = true;
-            enemy.pullToOrbitTimer = 0.5; // 0.5 second pull-in time
-            enemy.orbitAngle = Math.random() * Math.PI * 2;
-            enemy.orbitDist = 100 * Math.sqrt(area);
-            enemy.orbitDuration = duration;
-            enemy.orbitSpeed = speed;
-            enemy.orbitDamage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
-            enemy.orbitTrail = [];
         }
     }
 }
@@ -2171,19 +2198,6 @@ function weaponNextLevelDescription(inst){
         }
     }
 
-    if (inst.id === "hurricane") {
-        switch (next) {
-            case 2: return "Pulls +1 enemy.";
-            case 3: return "Area +20%, Base Damage +5.";
-            case 4: return "Duration +1s.";
-            case 5: return "Pulls +1 enemy.";
-            case 6: return "Speed +30%, Base Damage +5.";
-            case 7: return "Duration +1s.";
-            case 8: return "Pulls +1 enemy.";
-            default: return "Pulls a random enemy into a damaging orbit around you.";
-        }
-    }
-
     if (inst.id === "fire_wand") {
         switch (next) {
             case 2: return "Base Damage +10.";
@@ -2236,19 +2250,19 @@ function randPickAndRemove(arr){ const idx = Math.floor(Math.random()*arr.length
 function shuffleArray(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; } 
 // ------------------- Enemy types & enemy pool ------------------- 
 const EnemyTypes={ 
-    goblin:{hp:3,dmg:6,armor:1,speed:80,size:12,xpValue:0.9, color: '#8fbc8f'}, 
-    orc:{hp:15,dmg:9,armor:3,speed:60,size:18,xpValue:6.5, color: '#d2691e'},
-    bat:{hp:2,dmg:5,armor:0,speed:120,size:8,xpValue:0.6, color: '#a9a9a9'},
-    skeleton:{hp:9,dmg:10,armor:2,speed:70,size:14,xpValue:5.5, color: '#f5f5dc'},
-    golem:{hp:30,dmg:12,armor:5,speed:40,size:24,xpValue:15, color: '#708090'},
-    ogre_boss:{hp:180,dmg:15,armor:10,speed:50,size:32,xpValue:53, isBoss: true, color: '#dc143c'},
-    sprinter: {hp: 6, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 2.8, color: '#add8e6'},
-    tank: {hp: 80, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 13, color: '#a52a2a'},
-    banshee: {hp: 40, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 5, color: '#e0ffff'},
-    lich: {hp: 60, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 24, isBoss: true, color: '#9370db'},
-    gargoyle: {hp: 100, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 17, color: '#696969'},
-    doomknight: {hp: 1000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 170, isBoss: true, color: '#4b0082'},
-    ghoul: {hp: 4, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.8, color: '#556b2f', isHorde: true},
+    goblin:{hp:6,dmg:6,armor:1,speed:80,size:12,xpValue:0.8, color: '#8fbc8f'},
+    orc:{hp:60,dmg:9,armor:3,speed:60,size:18,xpValue:2.5, color: '#d2691e'},
+    bat:{hp:4,dmg:5,armor:0,speed:120,size:8,xpValue:0.5, color: '#a9a9a9'},
+    skeleton:{hp:25,dmg:10,armor:2,speed:70,size:14,xpValue:1.5, color: '#f5f5dc'},
+    golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
+    ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
+    sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
+    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'},
+    banshee: {hp: 50, dmg: 12, armor: 2, speed: 150, size: 14, xpValue: 3, color: '#e0ffff'},
+    lich: {hp: 200, dmg: 18, armor: 5, speed: 50, size: 20, xpValue: 15, isBoss: true, color: '#9370db'},
+    gargoyle: {hp: 300, dmg: 15, armor: 10, speed: 30, size: 26, xpValue: 10, color: '#696969'},
+    doomknight: {hp: 2000, dmg: 25, armor: 15, speed: 45, size: 40, xpValue: 150, isBoss: true, color: '#4b0082'},
+    ghoul: {hp: 15, dmg: 5, armor: 0, speed: 90, size: 12, xpValue: 0.5, color: '#556b2f', isHorde: true},
 }; 
  
 class Enemy {
@@ -2277,14 +2291,6 @@ class Enemy {
         this.isFrozen = false;
         this.freezeTimer = 0;
 
-        this.isOrbiting = false;
-        this.orbitAngle = 0;
-        this.orbitDist = 0;
-        this.orbitDuration = 0;
-        this.orbitSpeed = 0;
-        this.isPullingToOrbit = false;
-        this.pullToOrbitTimer = 0;
-        this.orbitTrail = [];
     }
 
     freeze(duration) {
@@ -2312,10 +2318,10 @@ class Enemy {
     applySpawnScaling() {
         const curse = 1 + (player.stats.Curse / 100);
         const minute = Math.floor(gameTime / 60);
-        const hpTimeScaling = 1 + minute/10 * (this.isHordeEnemy ? 0.15 : 0.25);
-        const dmgTimeScaling = 1 + minute/20;
+        const hpTimeScaling = 1 + minute * 0.045;
+        const dmgTimeScaling = 1 + minute * 0.02;
 
-        this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 5 : 1);
+        this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 2.5 : 1);
         this.dmg = this.dmg * curse * dmgTimeScaling;
 
         if (timeStopEffect.active) {
@@ -2358,56 +2364,6 @@ class Enemy {
 
     // ----- Movement & Collision (only if not frozen) -----
     if (!this.isFrozen) {
-        if (this.isPullingToOrbit) {
-            this.pullToOrbitTimer -= dt;
-            const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-            const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
-            this.x += (targetX - this.x) * 0.1;
-            this.y += (targetY - this.y) * 0.1;
-
-            if (this.pullToOrbitTimer <= 0) {
-                this.isPullingToOrbit = false;
-                this.isOrbiting = true;
-            }
-            return;
-        }
-
-        if (this.isOrbiting) {
-            this.orbitAngle += 3 * this.orbitSpeed * dt;
-            this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-            this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
-
-            this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
-            for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
-                this.orbitTrail[i].life -= dt;
-                if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
-            }
-
-            for (const e of enemies.active) {
-                if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
-                    const finalDmg = Math.max(1, this.orbitDamage - e.armor);
-                    e.hp -= finalDmg;
-                    e.hitFlash = 0.2;
-                const h = hitmarks.spawn(); h.spawn(e.x, e.y, finalDmg, "#add8e6");
-                }
-            }
-
-            for (const b of breakables.active) {
-                if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
-                    b.destroy();
-                }
-            }
-
-            this.orbitDuration -= dt;
-            if (this.orbitDuration <= 0) {
-                this.isOrbiting = false;
-                const finalDmg = Math.max(1, this.orbitDamage * 2);
-                this.hp -= finalDmg;
-                this.hitFlash = 0.5;
-            }
-            return;
-        }
-
         if (this.slowTimer > 0) {
             this.slowTimer -= dt;
             if (this.slowTimer <= 0) {
@@ -2459,14 +2415,6 @@ class Enemy {
 }
  
   render() { 
-    if (this.isOrbiting) {
-        for (const p of this.orbitTrail) {
-            ctx.fillStyle = `rgba(200, 200, 255, ${p.life / 0.2 * 0.5})`;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, this.r * (p.life / 0.2), 0, Math.PI * 2);
-            ctx.fill();
-        }
-    }
     ctx.fillStyle = this.hitFlash > 0 ? "#fff" : (this.isFrozen ? "#add8e6" : EnemyTypes[this.type].color);
     ctx.beginPath(); 
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2); 
@@ -2804,7 +2752,7 @@ class DamagingZone {
                     const finalDmg = Math.max(1, this.damage - e.armor);
                     e.hp -= finalDmg;
                     const h = hitmarks.spawn();
-                    h.spawn(e.x, e.y, finalDmg, "#6464ff");
+                    h.spawn(e.x, e.y, finalDmg, "#add8e6");
                     this.hitEnemies.set(e, gameTime);
                 }
             }
@@ -3163,7 +3111,7 @@ function update(dt){
           const finalDmg = Math.max(1, bolt.damage - e.armor);
           e.hp -= finalDmg;
           const h = hitmarks.spawn();
-          h.spawn(e.x, e.y, finalDmg, "#ff0");
+            h.spawn(e.x, e.y, finalDmg, "#ffd700");
         }
       }
       for (const b of breakables.active) {
@@ -3276,6 +3224,304 @@ player.weaponSlots[0].applyLevelEffects(player.weaponSlots[0].level); // ensure 
 // Keep inventory UI updated when passives change externally 
 updateInventoryUI(); 
 updatePassiveSlotsUI(); 
+
+// --- CONSOLE IMPLEMENTATION ---
+class ConsoleManager {
+    constructor() {
+        this.outputEl = document.getElementById('consoleOutput');
+        this.inputEl = document.getElementById('consoleInput');
+        this.history = [];
+        this.historyIndex = -1;
+        this.commands = {};
+        this.currentSuggestion = '';
+
+        this.inputEl.addEventListener('keydown', this.onKeyDown.bind(this));
+        this.inputEl.addEventListener('input', this.onInput.bind(this));
+    }
+
+    onInput() {
+        this.updateSuggestions();
+    }
+
+    updateSuggestions() {
+        const text = this.inputEl.value;
+        const suggestionEl = document.getElementById('autocompleteSuggestion');
+
+        if (!text) {
+            suggestionEl.textContent = '';
+            this.currentSuggestion = '';
+            return;
+        }
+
+        const parts = text.split(' ');
+        const command = parts[0];
+        const arg = parts.length > 1 ? parts[parts.length - 1] : '';
+
+        let suggestions = [];
+        if (parts.length === 1) {
+            suggestions = Object.keys(this.commands).filter(c => c.startsWith(command));
+        } else {
+            const commandDef = this.commands[command];
+            if (commandDef && commandDef.getSuggestions) {
+                suggestions = commandDef.getSuggestions(parts.slice(1));
+            }
+        }
+
+        if (suggestions.length > 0) {
+            const match = suggestions.find(s => s.startsWith(arg));
+            if (match) {
+                this.currentSuggestion = [...parts.slice(0, parts.length - 1), match].join(' ');
+                suggestionEl.textContent = this.currentSuggestion;
+            } else {
+                suggestionEl.textContent = '';
+                this.currentSuggestion = '';
+            }
+        } else {
+            suggestionEl.textContent = '';
+            this.currentSuggestion = '';
+        }
+    }
+
+    onKeyDown(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            if (this.currentSuggestion) {
+                this.inputEl.value = this.currentSuggestion;
+                this.onInput();
+            }
+        } else if (e.key === 'Enter') {
+            const text = this.inputEl.value;
+            if (text) {
+                this.executeCommand(text);
+                this.history.unshift(text);
+                if (this.history.length > 50) this.history.pop();
+                this.historyIndex = -1;
+                this.inputEl.value = '';
+                this.onInput();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (this.history.length > 0 && this.historyIndex < this.history.length - 1) {
+                this.historyIndex++;
+                this.inputEl.value = this.history[this.historyIndex];
+                this.onInput();
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (this.historyIndex > 0) {
+                this.historyIndex--;
+                this.inputEl.value = this.history[this.historyIndex];
+            } else {
+                this.historyIndex = -1;
+                this.inputEl.value = '';
+            }
+            this.onInput();
+        }
+    }
+
+    registerCommand(name, handler, description = '', getSuggestions = null) {
+        this.commands[name] = { handler, description, getSuggestions };
+    }
+
+    executeCommand(text) {
+        this.log(`> ${text}`);
+        const [command, ...args] = text.trim().split(/\s+/);
+        if (this.commands[command]) {
+            try {
+                const result = this.commands[command].handler(args);
+                if (result) this.log(result, 'log-success');
+            } catch (error) {
+                this.log(`Error: ${error.message}`, 'log-error');
+            }
+        } else {
+            this.log(`Unknown command: ${command}`, 'log-error');
+        }
+    }
+
+    log(message, className = '') {
+        const div = document.createElement('div');
+        div.textContent = message;
+        if (className) div.className = className;
+        this.outputEl.appendChild(div);
+        this.outputEl.scrollTop = this.outputEl.scrollHeight;
+    }
+}
+
+const consoleManager = new ConsoleManager();
+
+// --- COMMAND DEFINITIONS ---
+consoleManager.registerCommand('give', (args) => {
+    const [type, name, value = '1'] = args;
+    if (!type || !name) throw new Error('Usage: give <type> <name> [value]');
+
+    const numValue = parseInt(value, 10);
+    if (isNaN(numValue)) throw new Error('INVALID_VALUE');
+
+    switch (type) {
+        case 'item': {
+    const isWeapon = !!weaponsCatalog[name];
+    const isPassive = !!passiveMap[name];
+
+    if (!isWeapon && !isPassive) {
+        throw new Error(`Item '${name}' NOT_FOUND`);
+    }
+
+    if (isWeapon) {
+        let weaponInstance = player.weaponSlots.find(w => w && w.id === name);
+        if (weaponInstance) { // Already has weapon, level up
+            const currentLevel = weaponInstance.level;
+            const targetLevel = Math.min(weaponInstance.maxLevel, currentLevel + numValue);
+            if (currentLevel >= weaponInstance.maxLevel) {
+                throw new Error('MAX_LEVEL_REACHED');
+            }
+            weaponInstance.applyLevelEffects(targetLevel);
+            updateInventoryUI();
+            return `Leveled up ${weaponInstance.name} to level ${targetLevel}.`;
+        } else { // New weapon
+            const freeSlot = player.weaponSlots.findIndex(s => !s);
+            if (freeSlot === -1) {
+                throw new Error('SLOTS_FULL');
+            }
+            const template = weaponsCatalog[name];
+            const newWeapon = cloneWeaponTemplate(template);
+            player.weaponSlots[freeSlot] = newWeapon;
+            const targetLevel = Math.min(newWeapon.maxLevel, numValue);
+            newWeapon.applyLevelEffects(targetLevel);
+            updateInventoryUI();
+            return `Gave player ${newWeapon.name} (level ${newWeapon.level}).`;
+        }
+    } else { // isPassive
+        const passiveTemplate = passiveMap[name];
+        const currentLevel = player.passiveLevels[name] || 0;
+
+        if (currentLevel > 0) { // Already has passive, level up
+            if (currentLevel >= passiveTemplate.maxLevel) {
+                throw new Error('MAX_LEVEL_REACHED');
+            }
+            const targetLevel = Math.min(passiveTemplate.maxLevel, currentLevel + numValue);
+            for (let i = currentLevel; i < targetLevel; i++) {
+                levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+            }
+            player.passiveLevels[name] = targetLevel;
+            updateInventoryUI();
+            updatePassiveSlotsUI();
+            return `Leveled up ${passiveTemplate.name} to level ${targetLevel}.`;
+        } else { // New passive
+            const freeSlot = player.passiveSlots.findIndex(s => !s);
+            if (freeSlot === -1) {
+                throw new Error('SLOTS_FULL');
+            }
+            player.passiveSlots[freeSlot] = name;
+            const targetLevel = Math.min(passiveTemplate.maxLevel, numValue);
+            for (let i = 0; i < targetLevel; i++) {
+                levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+            }
+            player.passiveLevels[name] = targetLevel;
+            updateInventoryUI();
+            updatePassiveSlotsUI();
+            return `Gave player ${passiveTemplate.name} (level ${targetLevel}).`;
+        }
+    }
+}
+        case 'coins':
+            player.coins += numValue;
+            return `Added ${numValue} coins.`;
+        case 'xp':
+            player.addXP(numValue);
+            return `Added ${numValue} XP.`;
+        case 'stat': {
+            const statName = Object.keys(player.stats).find(s => s.toLowerCase() === name.toLowerCase());
+            if (!statName) throw new Error(`Stat '${name}' NOT_FOUND`);
+            player.stats[statName] += numValue;
+            return `Increased ${statName} by ${numValue}.`;
+        }
+        default:
+            throw new Error('INVALID_TYPE');
+    }
+}, 'Gives the player items, currency, or stats.', (args) => {
+    const [type, name] = args;
+    if (args.length <= 1) {
+        return ['item', 'coins', 'xp', 'stat'].filter(s => s.startsWith(type || ''));
+    }
+    if (type === 'item' && args.length <= 2) {
+        const allItems = { ...weaponsCatalog, ...passiveMap };
+        return Object.values(allItems).map(i => i.id).filter(id => id.startsWith(name || ''));
+    }
+    if (type === 'stat' && args.length <= 2) {
+        return Object.keys(player.stats).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('set', (args) => {
+    const [type, name, value] = args;
+    if (!type || !name || value === undefined) throw new Error('Usage: set <type> <name> <value>');
+
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) throw new Error('INVALID_VALUE');
+
+    switch (type) {
+        case 'time':
+            const minutes = parseInt(name, 10);
+            const seconds = value ? parseInt(value, 10) : 0;
+            if (isNaN(minutes) || isNaN(seconds)) throw new Error('Usage: set time <minutes> [seconds]');
+            gameTime = minutes * 60 + seconds;
+            return `Game time set to ${minutes}m ${seconds}s.`;
+        case 'stat': {
+            const statName = Object.keys(player.stats).find(s => s.toLowerCase() === name.toLowerCase());
+            if (!statName) throw new Error(`Stat '${name}' NOT_FOUND`);
+            player.stats[statName] = numValue;
+            return `Set ${statName} to ${numValue}.`;
+        }
+        default:
+            throw new Error('INVALID_TYPE');
+    }
+}, 'Sets a game value or player stat.', (args) => {
+    const [type, name] = args;
+    if (args.length <= 1) {
+        return ['time', 'stat'].filter(s => s.startsWith(type || ''));
+    }
+     if (type === 'stat' && args.length <= 2) {
+        return Object.keys(player.stats).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('spawn', (args) => {
+    const [enemyName, amount = '1'] = args;
+    if (!enemyName) throw new Error('Usage: spawn <enemyName> [amount]');
+
+    if (!EnemyTypes[enemyName]) throw new Error('ENEMY_NOT_FOUND');
+    const numAmount = parseInt(amount, 10);
+    if (isNaN(numAmount) || numAmount < 1) throw new Error('INVALID_AMOUNT');
+
+    for (let i = 0; i < numAmount; i++) {
+        const e = enemies.spawn();
+        e.init(enemyName);
+        e.spawn(player.x, player.y);
+    }
+    return `Spawned ${numAmount} ${enemyName}(s).`;
+}, 'Spawns enemies near the player.', (args) => {
+    const [enemyName] = args;
+    if (args.length <= 1) {
+        return Object.keys(EnemyTypes).filter(e => e.startsWith(enemyName || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('help', (args) => {
+    if (args[0]) {
+        const cmd = consoleManager.commands[args[0]];
+        if (cmd) return `${args[0]}: ${cmd.description}`;
+        throw new Error('COMMAND_NOT_FOUND');
+    }
+    return 'Available commands: ' + Object.keys(consoleManager.commands).join(', ');
+}, 'Shows a list of commands or help for a specific command.');
+
+consoleManager.registerCommand('clear', () => {
+    consoleManager.outputEl.innerHTML = '';
+    return 'Console cleared.';
+}, 'Clears the console output.');
  
 </script> 
 </body> 

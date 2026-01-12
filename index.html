@@ -1,0 +1,3091 @@
+<!DOCTYPE html> 
+<html lang="en"> 
+<head> 
+<meta charset="utf-8"/> 
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/> 
+<title>Swarm Survivor — Merged (Gameplay preserved, Gemini visuals) - v with weapon leveling</title> 
+<style> 
+/* --- CORE STYLES (Gemini visuals) --- */ 
+html,body{margin:0;padding:0;background:#050505;overflow:hidden;font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none;} 
+canvas{display:block;} 
+ 
+/* --- UI OVERLAYS --- */ 
+#uiLayer { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; } 
+.hud-element { pointer-events:auto; } 
+ 
+/* Stats (Top Left) */ 
+#stats { position:absolute; top:10px; left:10px; color:rgba(0,255,0,0.9); font-family:monospace; font-size:12px; white-space:pre; text-shadow:1px 1px 0 #000; } 
+ 
+/* Menus (Pause, Death, Level Up) */ 
+.overlay-menu { 
+  position:absolute; top:0; left:0; width:100%; height:100%; 
+  background:rgba(0,0,0,0.9); 
+  display:none; flex-direction:column; justify-content:center; align-items:center; 
+  color:#fff; z-index: 100; pointer-events: auto; 
+} 
+.overlay-menu h2 { margin:0 0 20px 0; font-size:32px; color:#0f0; text-shadow:0 0 10px #0f0; } 
+.overlay-menu p { font-size:18px; color:#ccc; margin-bottom: 20px; } 
+ 
+/* Buttons */ 
+button { 
+  padding:12px 24px; font-size:18px; font-weight:bold; 
+  background:#0f0; color:#000; border:none; border-radius:4px; cursor:pointer; 
+  margin:5px; transition: transform 0.1s, box-shadow 0.1s; 
+} 
+button:hover { transform:scale(1.05); box-shadow:0 0 15px #0f0; } 
+button:active { transform:scale(0.95); } 
+ 
+/* --- INVENTORY BARS (Bottom) --- */ 
+.bar-container { 
+  position:absolute; left:50%; transform:translateX(-50%); 
+  display:flex; gap:10px; 
+} 
+#weaponBar { bottom: 85px; z-index: 90; } 
+#passiveBar { bottom: 20px; z-index: 90; } 
+ 
+.slot { 
+  width:50px; height:50px; 
+  background:#1a1a1a; border:2px solid #333; border-radius:6px; 
+  display:flex; justify-content:center; align-items:center; 
+  font-size:24px; color:#666; position:relative; 
+  box-shadow: 0 4px 6px rgba(0,0,0,0.5); 
+} 
+.slot.filled { border-color:#0f0; color:#fff; background: linear-gradient(135deg, #222, #000); } 
+
+.slot.evolved {
+    border-color: gold;
+    animation: glow 1.5s infinite alternate;
+}
+
+@keyframes glow {
+    from {
+        box-shadow: 0 0 5px gold, 0 0 10px gold;
+    }
+    to {
+        box-shadow: 0 0 20px gold, 0 0 30px gold;
+    }
+}
+
+.slot .lvl-badge { 
+  position:absolute; bottom:-6px; right:-6px; 
+  background:#0f0; color:#000; font-size:10px; font-weight:bold; 
+  padding:2px 4px; border-radius:4px; font-family:monospace; 
+} 
+ 
+/* --- LEVEL UP CARDS --- */ 
+.card-container { display:flex; gap:20px; flex-wrap:wrap; justify-content:center; } 
+.card { 
+  width:220px; background:linear-gradient(180deg, #151515, #0a0a0a); 
+  border:2px solid #444; border-radius:8px; padding:15px; 
+  display:flex; flex-direction:column; align-items:center; cursor:pointer; 
+  transition: all 0.2s; box-shadow: 0 10px 20px rgba(0,0,0,0.5); 
+} 
+.card:hover { border-color:#0f0; transform:translateY(-5px); box-shadow: 0 0 15px rgba(0,255,0,0.2); } 
+.card-icon { font-size:48px; margin-bottom:10px; filter: drop-shadow(0 0 5px rgba(255,255,255,0.2)); } 
+.card-title { font-size:16px; font-weight:bold; color:#0f0; margin-bottom:5px; text-align:center; } 
+.card-type { font-size:11px; color:#888; text-transform:uppercase; margin-bottom:10px; letter-spacing:1px; } 
+.card-desc { font-size:13px; color:#ccc; text-align:center; line-height:1.4; white-space: pre-wrap; } 
+.card-new { color: #ffff00; font-size: 10px; margin-top:5px; font-weight:bold; } 
+
+/* --- Chest Animation --- */
+.reel-container {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    perspective: 500px;
+}
+.reel {
+    width: 100px;
+    height: 100px;
+    border: 2px solid #0f0;
+    border-radius: 10px;
+    background: #000;
+    overflow: hidden;
+    position: relative;
+    font-size: 64px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 0 20px #0f0 inset;
+}
+.reel-spinner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    transition: top 0.1s linear;
+}
+.reel-item {
+    height: 100px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+ 
+/* --- Additional small style fallbacks for old UI --- */ 
+.weaponSlots, .passiveSlots{ display:none; } /* keep hidden (we update DOM bars instead) */ 
+ 
+</style> 
+</head> 
+<body> 
+ 
+<canvas id="gameCanvas"></canvas> 
+ 
+<div id="uiLayer"> 
+  <div id="stats"></div> 
+ 
+  <div class="bar-container hud-element" id="weaponBar"></div> 
+  <div class="bar-container hud-element" id="passiveBar"></div> 
+ 
+  <div id="pauseMenu" class="overlay-menu"> 
+    <h2>PAUSED</h2> 
+    <div id="pauseStats" style="font-family:monospace; text-align:left; margin-bottom:20px;"></div> 
+    <div style="margin: 10px 0;">
+        <label for="volumeSlider">Volume:</label>
+        <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.5" style="vertical-align: middle;">
+    </div>
+    <button id="resumeBtn">Resume</button> 
+  </div> 
+ 
+  <div id="deathScreen" class="overlay-menu"> 
+    <h2>YOU DIED</h2> 
+    <p>Survived: <span id="timeSurvived">0:00</span></p> 
+    <button id="reviveBtn">Revive</button> 
+    <button id="restartBtn">Restart</button> 
+    <p id="noReviveMsg" style="font-size:14px; color:#f55; display:none; margin-top:10px;">No revivals left</p> 
+  </div> 
+ 
+  <div id="levelUpScreen" class="overlay-menu"> 
+    <h2>LEVEL UP!</h2> 
+    <div class="card-container" id="levelChoices"></div> 
+  </div> 
+
+  <div id="chestScreen" class="overlay-menu" style="display: none;">
+      <h2>CHEST OPENING!</h2>
+      <div id="chestAnimation" style="margin-bottom: 20px;"></div>
+      <div id="chestRewards" class="card-container"></div>
+      <button id="skipChestBtn" style="margin-top: 20px;">Skip</button>
+      <button id="closeChestBtn" style="margin-top: 20px; display: none;">Claim</button>
+  </div>
+</div> 
+ 
+<script> 
+// =================== MERGED GAME SCRIPT (PART 1) =================== 
+// Core setup and player. New systems integrated later (weapons, leveling, projectiles). 
+ 
+// ------------------- Core setup ------------------- 
+const canvas = document.getElementById("gameCanvas"); 
+const ctx = canvas.getContext("2d"); 
+function resize(){ canvas.width = innerWidth; canvas.height = innerHeight; } 
+window.addEventListener("resize", resize); 
+resize(); 
+ 
+const input={up:0,down:0,left:0,right:0}; 
+let paused=false; 
+let dead=false; 
+let gameTime = 0; 
+ 
+// Input handling 
+window.addEventListener("keydown",e=>{ 
+  if(dead) return; 
+  const k = e.key; 
+  if(k==="w" || e.key==="ArrowUp") input.up = 1; 
+  if(k==="s" || e.key==="ArrowDown") input.down = 1; 
+  if(k==="a" || e.key==="ArrowLeft") input.left = 1; 
+  if(k==="d" || e.key==="ArrowRight") input.right = 1; 
+  if(k==="p" || k==="Escape" || k===" "){ 
+    const levelEl = document.getElementById("levelUpScreen"); 
+    if(levelEl.style.display === "flex") return; 
+    togglePause(); 
+  } 
+}); 
+window.addEventListener("keyup",e=>{ 
+  if(e.key==="w" || e.key==="ArrowUp") input.up = 0; 
+  if(e.key==="s" || e.key==="ArrowDown") input.down = 0; 
+  if(e.key==="a" || e.key==="ArrowLeft") input.left = 0; 
+  if(e.key==="d" || e.key==="ArrowRight") input.right = 0; 
+}); 
+ 
+function togglePause() { 
+  paused = !paused; 
+  const menu = document.getElementById("pauseMenu"); 
+  menu.style.display = paused ? "flex" : "none"; 
+ 
+  if (paused) { 
+    document.getElementById("resumeBtn").onclick = togglePause; 
+ 
+    const statLines = Object.entries(player.stats).map(([k, v]) => { 
+      const meta = STAT_META[k]; 
+      if (!meta) return `${k}: ${v}`; 
+      if (meta.type === "percent") return `${k}: ${v.toFixed(0)}%`; 
+      if (meta.storeDecimals) return `${k}: ${Math.floor(v)}`; 
+      if (Number.isInteger(v)) return `${k}: ${v}`; 
+      return `${k}: ${v.toFixed(1)}`; 
+    }); 
+ 
+    document.getElementById("pauseStats").innerText = statLines.join("\n"); 
+    
+    const volumeSlider = document.getElementById("volumeSlider");
+    volumeSlider.value = audioManager.volume;
+    volumeSlider.oninput = (e) => {
+        audioManager.setVolume(e.target.value);
+    };
+  } 
+} 
+ 
+ 
+// ------------------- Background pattern ------------------- 
+let bgPattern = null; 
+function createBgPattern(){ 
+  const pCanvas = document.createElement('canvas'); 
+  pCanvas.width = 128; pCanvas.height = 128; 
+  const pCtx = pCanvas.getContext('2d'); 
+  pCtx.fillStyle = "#111"; pCtx.fillRect(0,0,128,128); 
+  pCtx.strokeStyle = "#222"; pCtx.lineWidth = 2; pCtx.strokeRect(0,0,128,128); 
+  pCtx.fillStyle = "#1a1a1a"; 
+  pCtx.beginPath(); pCtx.arc(64,64,4,0,Math.PI*2); pCtx.fill(); 
+  bgPattern = ctx.createPattern(pCanvas,'repeat'); 
+} 
+createBgPattern(); 
+ 
+// ------------------- Pool ------------------- 
+class Pool{ 
+  constructor(factory,size=200){ this.factory=factory; this.free=[]; this.active=[]; for(let i=0;i<size;i++) this.free.push(factory()); } 
+  spawn(){ const o = this.free.pop() || this.factory(); this.active.push(o); return o; } 
+  recycle(o){ const i = this.active.indexOf(o); if(i>=0) this.active.splice(i,1); this.free.push(o); } 
+} 
+ 
+// ------------------- Hitmarks ------------------- 
+class Hitmark { 
+  constructor() { this.active=false; this.x=0; this.y=0; this.text=''; this.color='#fff'; this.alpha=1; this.vy=-30; this.t=0; this.life=0.9; this.size=16; } 
+  spawn(x, y, dmg, color='#fff'){ 
+    this.x=x; this.y=y; this.color=color; 
+    this.text = typeof dmg==='number'?Math.round(dmg):String(dmg); 
+    let n=Number(dmg); if(isNaN(n)) n=1; 
+    this.size=Math.max(12,Math.min(28,14+n/4)); 
+    this.alpha=1; this.vy=-30; this.t=0; this.life=0.9; this.active=true; 
+  } 
+  update(dt){ if(!this.active) return; this.t+=dt; this.y+=this.vy*dt; this.alpha=Math.max(0,1-this.t/this.life); if(this.t>=this.life) this.active=false; } 
+  render(){ if(!this.active) return; ctx.save(); ctx.globalAlpha=this.alpha; ctx.fillStyle=this.color; ctx.font=`${Math.round(this.size)}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.text,this.x,this.y); ctx.restore(); } 
+} 
+const hitmarks = new Pool(()=>new Hitmark(),50); 
+ 
+// ------------------- Player ------------------- 
+class Player{ 
+  constructor(){ 
+    this.invuln = 0; this.recoveryTimer=1; 
+    this.x=0; this.y=0; this.r=12; 
+    this.stats={ 
+      "Max Health":100,"Recovery":1,"Armor":2,"Move Speed":220,"Might":0,"Area":1, 
+      "Speed":1,"Duration":1,"Amount":0,"Cooldown":0,"Luck":0,"Growth":2500,"Greed":0, 
+      "Curse":0,"Magnet":1,"Revival":1 
+    }; 
+    this.hp=this.stats["Max Health"]; 
+    this.maxhp=this.stats["Max Health"]; 
+    this.spd=this.stats["Move Speed"]; 
+    this.angle=0; 
+    // weaponSlots keep Weapon objects (or null) 
+    this.weaponSlots=[null,null,null,null,null,null]; 
+    this.passiveSlots=[null,null,null,null,null,null]; 
+    this.passiveLevels={}; 
+    this.weaponsCooldown=[0,0,0,0,0,0]; 
+    this.hitSlow=0; 
+    this.xp=0; 
+    this.level=1; 
+    this.xpToNext=10;
+    this.coins = 0;
+    this.flameBreath = { active: false, timer: 0, damage: 0 };
+  } 
+ 
+  update(dt){ 
+    if(paused||dead) return; 
+    if(this.invuln>0) this.invuln = Math.max(0,this.invuln - dt); 
+ 
+    let vx=(input.right-input.left), vy=(input.down-input.up); 
+    const len=Math.hypot(vx,vy)||1; 
+    vx/=len; vy/=len; 
+    let speed=this.stats["Move Speed"]*(1-this.hitSlow); 
+    this.x+=vx*speed*dt; 
+    this.y+=vy*speed*dt; 
+    if(this.hitSlow>0) this.hitSlow-=dt;
+
+    if (this.flameBreath.active) {
+        this.flameBreath.timer -= dt;
+        if (this.flameBreath.timer <= 0) {
+            this.flameBreath.active = false;
+        } else if (len > 0 && gameTime % 0.1 < 0.05) { // Only fire when moving
+            const p = flameParticles.spawn();
+            const spread = (Math.random() - 0.5) * 0.6;
+            const angle = Math.atan2(vy, vx) + spread; // Use player's movement direction
+            const pSpeed = 350 + Math.random() * 100;
+            p.spawn(this.x, this.y, Math.cos(angle) * pSpeed, Math.sin(angle) * pSpeed, 0.8, this.flameBreath.damage);
+        }
+    }
+ 
+    let nearest=null, nd=1e9; 
+    for(const e of enemies.active){ const d=(e.x-this.x)**2+(e.y-this.y)**2; if(d<nd){ nd=d; nearest=e; } } 
+    if(nearest){ const targetAngle=Math.atan2(nearest.y-this.y, nearest.x-this.x); this.angle += (targetAngle-this.angle)*0.1; } 
+ 
+    for(let i=0;i<this.weaponSlots.length;i++){ 
+      const w=this.weaponSlots[i]; if(!w) continue; 
+      this.weaponsCooldown[i]-=dt; 
+      if(this.weaponsCooldown[i]<=0){ 
+        // Fire using weapon-specific cooldown calculation (new safer formula) 
+        w.fire(this, i); 
+        // After firing, compute next cooldown using baseCooldown and player's global Cooldown percent 
+        const playerCooldownPercent = (this.stats["Cooldown"]||0); // percent (0 means no change) 
+        const actual = Math.max(0.05, w.baseCooldown * (1 - playerCooldownPercent / 100)); 
+        this.weaponsCooldown[i] = actual; 
+      } 
+    } 
+ 
+    this.recoveryTimer-=dt; 
+    if(this.recoveryTimer<=0){ this.hp = Math.min(this.maxhp, this.hp + this.stats.Recovery); this.recoveryTimer = 1; } 
+ 
+    if(this.hp<0) this.hp=0; 
+    if(this.hp===0 && !dead) triggerDeath(); 
+  } 
+ 
+  addXP(xp){ 
+    const growthMult = 1 + (this.stats["Growth"] / 100); 
+    const gainedXP = xp * growthMult; 
+    const intPart = Math.floor(gainedXP); 
+    const frac = gainedXP - intPart; 
+    const finalXP = intPart + (Math.random() < frac ? 1 : 0); 
+    this.xp += finalXP; 
+ 
+    if(this.xp >= this.xpToNext){ 
+      this.xp -= this.xpToNext; 
+      this.level++; 
+      this.xpToNext = Math.floor(this.xpToNext * 1.25); 
+      const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0"); 
+      levelUpController.onLevelUp(); 
+    } 
+  } 
+ 
+  render(){ 
+    ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.angle); 
+    ctx.fillStyle = this.invuln > 0 ? "#fff" : "#0f0"; 
+    ctx.beginPath(); 
+    ctx.moveTo(this.r,0); ctx.lineTo(-this.r*0.6,this.r*0.6); ctx.lineTo(-this.r*0.6,-this.r*0.6); ctx.closePath(); ctx.fill(); 
+    ctx.restore(); 
+  } 
+} 
+const player = new Player(); 
+ 
+// ------------------- Utilities ------------------- 
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); } 
+
+class AudioManager {
+    constructor() {
+        this.sounds = {};
+        this.volume = 0.5;
+        this.loadSounds();
+    }
+
+    loadSounds() {
+        // Placeholder sounds - replace with actual sound files
+        this.sounds['hit'] = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+        this.sounds['pickup'] = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+        this.sounds['level_up'] = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+    }
+
+    play(soundName) {
+        if (this.sounds[soundName]) {
+            this.sounds[soundName].currentTime = 0;
+            this.sounds[soundName].volume = this.volume;
+            this.sounds[soundName].play();
+        }
+    }
+
+    setVolume(volume) {
+        this.volume = volume;
+    }
+}
+const audioManager = new AudioManager();
+<!-- =================== MERGED GAME SCRIPT (PART 2) =================== --> 
+// ------------------- Projectile & Weapon classes (with pierce & strong mode) ------------------- 
+class Projectile{ 
+  constructor(){  
+    this.active=false; 
+    this.x=0; this.y=0; this.r=4; this.spd=300; this.duration=0.5; this.elapsed=0;  
+    this.vx=0; this.vy=0; this.target=null; this.damage=10; this.trail=[];  
+    this.pierce = -1; // weapon-local pierce applied on spawn 
+    this.hitSet = new Set(); // enemies hit by this projectile 
+  } 
+  spawn(px,py,angle,speed,duration,damage,pierce= -1, visualType = 'default'){
+    this.x=px; this.y=py; this.r=4; this.spd=speed; this.duration=duration; this.elapsed=0; 
+    this.vx=Math.cos(angle)*speed; this.vy=Math.sin(angle)*speed; this.active=true; this.target=null; this.damage=damage; 
+    this.trail = []; this.pierce = pierce; this.hitSet = new Set();
+    this.visualType = visualType;
+    // set travel angle stored for lazy continuation if no target 
+    this.travelAngle = angle; 
+  } 
+  update(dt) { 
+    if (!this.active) return; 
+    this.elapsed += dt; 
+    if (this.elapsed >= this.duration) { this.active = false; return; } 
+ 
+    // Homing / steering when target exists 
+    if (this.target && this.target.hp > 0) { 
+      const dx = this.target.x - this.x; 
+      const dy = this.target.y - this.y; 
+      const dist = Math.hypot(dx, dy) || 1; 
+      const steer = 8; // how fast projectile turns 
+      const desiredVX = (dx / dist) * this.spd; 
+      const desiredVY = (dy / dist) * this.spd; 
+      this.vx += (desiredVX - this.vx) * Math.min(1, steer * dt); 
+      this.vy += (desiredVY - this.vy) * Math.min(1, steer * dt); 
+      this.travelAngle = Math.atan2(this.vy, this.vx); 
+    } else { 
+      // continue in straight line using travelAngle (lazy mode) 
+      const desiredVX = Math.cos(this.travelAngle) * this.spd; 
+      const desiredVY = Math.sin(this.travelAngle) * this.spd; 
+      // gentle interpolation so it doesn't snap abruptly 
+      this.vx += (desiredVX - this.vx) * Math.min(1, 6 * dt); 
+      this.vy += (desiredVY - this.vy) * Math.min(1, 6 * dt); 
+    } 
+ 
+    this.x += this.vx * dt; 
+    this.y += this.vy * dt; 
+ 
+    // Trail update (visual only) 
+    this.trail.push({x:this.x, y:this.y, life:0.18}); 
+    for(let i=this.trail.length-1;i>=0;i--){ this.trail[i].life -= dt; if(this.trail[i].life <= 0) this.trail.splice(i,1); } 
+ 
+    for (const b of breakables.active) {
+        if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
+            b.destroy();
+            this.active = false;
+            return;
+        }
+    }
+
+    // Collision check (respect hitSet) 
+    for (const e of enemies.active) { 
+      if (this.hitSet.has(e)) continue; // already hit 
+      const d = Math.hypot(e.x - this.x, e.y - this.y); 
+      if (d < e.r + this.r) { 
+        // Hit! 
+        const finalDmg = this.damage * (1 + player.stats.Might / 100); 
+        const reduced = Math.max(1, finalDmg - e.armor); 
+        e.hp -= reduced; 
+        const h = hitmarks.spawn(); h.spawn(this.x, this.y, reduced, "#0ff"); 
+        audioManager.play('hit');
+        this.hitSet.add(e); 
+        this.pierce -= 1;
+        if (this.pierce < 0) {
+            this.active = false;
+        } else {
+            let nearest = null; let nd = Infinity;
+            for (const c of enemies.active) {
+                if (this.hitSet.has(c)) continue;
+                const dist2 = (c.x - this.x) ** 2 + (c.y - this.y) ** 2;
+                if (dist2 < nd) { nd = dist2; nearest = c; }
+            }
+            if (nearest) {
+                this.target = nearest;
+                const dxn = nearest.x - this.x, dyn = nearest.y - this.y, dn = Math.hypot(dxn,dyn)||1;
+                this.vx = (dxn/dn) * this.spd;
+                this.vy = (dyn/dn) * this.spd;
+                this.travelAngle = Math.atan2(this.vy, this.vx);
+            } else {
+                this.target = null;
+            }
+        }
+        break; 
+      } 
+    } 
+  } 
+ 
+  render() {
+    if (!this.active) return;
+    
+    let headColor = "#fff";
+    let trailColor = "rgba(0,255,255,";
+    let shadowColor = "#0ff";
+
+    if (this.visualType === 'holy') {
+        headColor = "#ffffaa";
+        trailColor = "rgba(255,255,180,";
+        shadowColor = "#fff";
+    }
+
+    // draw trail 
+    ctx.lineWidth = this.r * (this.visualType === 'holy' ? 1.5 : 1);
+    ctx.lineCap = "round";
+    for (let i = 0; i < this.trail.length - 1; i++) {
+        const p1 = this.trail[i];
+        const p2 = this.trail[i + 1];
+        ctx.strokeStyle = `${trailColor}${(p1.life / 0.18) * 0.8})`;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+    }
+    // head 
+    ctx.fillStyle = headColor;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+    // glow 
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = shadowColor;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r + 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+} 
+const projectiles = new Pool(()=>new Projectile(),1000); 
+ 
+class CrossProjectile {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.r = 10; // Hitbox radius
+        this.vx = 0;
+        this.vy = 0;
+        this.damage = 0;
+        this.pierce = Infinity; // Cross always pierces
+        this.hitEnemies = new Set();
+        this.duration = 0;
+        this.elapsed = 0;
+        this.returning = false;
+        this.rotation = 0;
+        this.rotationSpeed = 10;
+        this.area = 1;
+    }
+
+    spawn(x, y, angle, speed, duration, damage, area) {
+        this.x = x;
+        this.y = y;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.duration = duration;
+        this.damage = damage;
+        this.area = area;
+        this.r = 10 * Math.sqrt(area); // Scale hitbox with area
+
+        this.active = true;
+        this.elapsed = 0;
+        this.returning = false;
+        this.hitEnemies.clear();
+        this.rotation = 0;
+    }
+
+    update(dt) {
+        if (!this.active) return;
+
+        this.elapsed += dt;
+
+        // Boomerang effect
+        if (!this.returning && this.elapsed >= this.duration / 2) {
+            this.returning = true;
+            this.vx *= -1;
+            this.vy *= -1;
+            this.hitEnemies.clear(); // Can hit enemies again on the way back
+        }
+
+        if (this.elapsed >= this.duration) {
+            this.active = false;
+            crossProjectiles.recycle(this);
+            return;
+        }
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.rotation += this.rotationSpeed * dt;
+
+        // Collision
+        for (const e of enemies.active) {
+            if (!this.hitEnemies.has(e) && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
+                const finalDmg = Math.max(1, this.damage - e.armor);
+                e.hp -= finalDmg;
+                const h = hitmarks.spawn();
+                h.spawn(e.x, e.y, finalDmg, "#ffffff");
+                this.hitEnemies.add(e);
+                // No pierce countdown, it's infinite
+            }
+        }
+        
+        for (const b of breakables.active) {
+            if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
+                b.destroy();
+            }
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        
+        const size = 15 * this.area;
+        ctx.fillStyle = "#e0e0e0";
+        ctx.strokeStyle = "#333333";
+        ctx.lineWidth = 3;
+
+        // Draw cross shape
+        ctx.beginPath();
+        ctx.moveTo(-size / 2, -size / 6);
+        ctx.lineTo(-size / 6, -size / 6);
+        ctx.lineTo(-size / 6, -size / 2);
+        ctx.lineTo(size / 6, -size / 2);
+        ctx.lineTo(size / 6, -size / 6);
+        ctx.lineTo(size / 2, -size / 6);
+        ctx.lineTo(size / 2, size / 6);
+        ctx.lineTo(size / 6, size / 6);
+        ctx.lineTo(size / 6, size / 2);
+        ctx.lineTo(-size / 6, size / 2);
+        ctx.lineTo(-size / 6, size / 6);
+        ctx.lineTo(-size / 2, size / 6);
+        ctx.closePath();
+        
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.restore();
+    }
+}
+const crossProjectiles = new Pool(() => new CrossProjectile(), 50);
+
+class Fireball {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.r = 8;
+        this.vx = 0;
+        this.vy = 0;
+        this.damage = 0;
+        this.duration = 0;
+        this.elapsed = 0;
+        this.trail = [];
+    }
+
+    spawn(x, y, angle, speed, duration, damage) {
+        this.x = x;
+        this.y = y;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.duration = duration;
+        this.damage = damage;
+        this.active = true;
+        this.elapsed = 0;
+        this.trail = [];
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        this.elapsed += dt;
+        if (this.elapsed >= this.duration) {
+            this.active = false;
+            fireballs.recycle(this);
+            return;
+        }
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        this.trail.push({ x: this.x, y: this.y, life: 0.2 });
+        for (let i = this.trail.length - 1; i >= 0; i--) {
+            this.trail[i].life -= dt;
+            if (this.trail[i].life <= 0) this.trail.splice(i, 1);
+        }
+
+        for (const e of enemies.active) {
+            if (Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
+                const finalDmg = Math.max(1, this.damage - e.armor);
+                e.hp -= finalDmg;
+                const h = hitmarks.spawn();
+                h.spawn(e.x, e.y, finalDmg, "#ff8c00");
+                this.active = false;
+                fireballs.recycle(this);
+                return;
+            }
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        
+        // Trail
+        for (const p of this.trail) {
+            const progress = p.life / 0.2;
+            ctx.fillStyle = `rgba(255, ${100 + Math.random() * 50}, 0, ${progress * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, this.r * progress * (1 + Math.random() * 0.5), 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Core
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = 'red';
+        ctx.fillStyle = `rgba(255, ${150 + Math.random() * 105}, 0, 1)`;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+const fireballs = new Pool(() => new Fireball(), 100);
+
+class StaticEffect {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.width = 0;
+        this.height = 0;
+        this.angle = 0;
+        this.damage = 0;
+        this.duration = 0;
+        this.elapsed = 0;
+        this.hitEnemies = new Set();
+        this.renderFunc = null; // For custom rendering
+    }
+
+    spawn(x, y, width, height, angle, damage, duration, renderFunc = null) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.angle = angle;
+        this.damage = damage;
+        this.duration = duration;
+        this.active = true;
+        this.elapsed = 0;
+        this.hitEnemies.clear();
+        this.renderFunc = renderFunc;
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        this.elapsed += dt;
+        if (this.elapsed >= this.duration) {
+            this.active = false;
+            staticEffects.recycle(this);
+            return;
+        }
+
+        // Broad phase collision check
+        const aabb = {
+            cx: this.x,
+            cy: this.y,
+            halfWidth: Math.max(this.width, this.height) / 2
+        };
+
+        for (const e of enemies.active) {
+            if (this.hitEnemies.has(e)) continue;
+
+            // Simple circle-AABB broad phase
+            if (Math.abs(e.x - aabb.cx) > aabb.halfWidth + e.r ||
+                Math.abs(e.y - aabb.cy) > aabb.halfWidth + e.r) {
+                continue;
+            }
+
+            // Narrow phase (OBB vs Circle)
+            const dx = e.x - this.x;
+            const dy = e.y - this.y;
+            const rotatedX = dx * Math.cos(-this.angle) - dy * Math.sin(-this.angle);
+            const rotatedY = dx * Math.sin(-this.angle) + dy * Math.cos(-this.angle);
+
+            if (Math.abs(rotatedX) < this.width / 2 + e.r &&
+                Math.abs(rotatedY) < this.height / 2 + e.r) {
+                
+                const finalDmg = Math.max(1, this.damage - e.armor);
+                e.hp -= finalDmg;
+                const h = hitmarks.spawn();
+                h.spawn(e.x, e.y, finalDmg, "#e6e6fa"); // Lavender color for sword
+                this.hitEnemies.add(e);
+            }
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        if (this.renderFunc) {
+            this.renderFunc(this);
+        } else {
+            // Default rectangle render
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.angle);
+            ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+            ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+            ctx.restore();
+        }
+    }
+}
+const staticEffects = new Pool(() => new StaticEffect(), 100);
+
+class DemonicSigilEffect {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.radius = 1;
+        this.damage = 0;
+        this.drawingDuration = 10;
+        this.activeDuration = 1.4;
+        this.elapsed = 0;
+        this.state = 'drawing'; // drawing, active
+        this.lastDmgTime = 0;
+        this.slowFactor = 0.5;
+    }
+
+    spawn(x, y, radius, damage) {
+        this.x = x;
+        this.y = y;
+        this.radius = radius;
+        this.damage = damage;
+        this.active = true;
+        this.elapsed = 0;
+        this.state = 'drawing';
+        this.lastDmgTime = 0;
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        this.elapsed += dt;
+
+        if (this.state === 'drawing' && this.elapsed >= this.drawingDuration) {
+            this.state = 'active';
+            this.elapsed = 0; // Reset timer for active phase
+        }
+
+        if (this.state === 'active') {
+            if (this.elapsed >= this.activeDuration) {
+                this.active = false;
+                demonicSigils.recycle(this);
+                return;
+            }
+
+            if (gameTime - this.lastDmgTime > 0.2) {
+                this.lastDmgTime = gameTime;
+                for (const e of enemies.active) {
+                    if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
+                        const finalDmg = Math.max(1, this.damage - e.armor);
+                        e.hp -= finalDmg;
+                        e.slowFactor = this.slowFactor;
+                        e.slowTimer = 0.3;
+                        const h = hitmarks.spawn();
+                        h.spawn(e.x, e.y, finalDmg, "#ff4500");
+                    }
+                }
+            }
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        const progress = Math.min(1, this.elapsed / this.drawingDuration);
+
+        if (this.state === 'drawing') {
+            this.renderPentagram(progress);
+        } else { // Active state
+            const pulse = 0.7 + Math.sin(this.elapsed * 10) * 0.3;
+            ctx.globalAlpha = pulse;
+            this.renderPentagram(1); // Render full pentagram
+        }
+
+        ctx.restore();
+    }
+
+    renderPentagram(progress) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = 'red';
+
+        const totalLength = (Math.PI * 2 * this.radius) + (5 * this.radius * 2 * Math.sin(Math.PI / 5) / Math.sin(2 * Math.PI / 5)) * 2;
+        const circleLength = Math.PI * 2 * this.radius;
+        const circleProgress = Math.min(1, progress * (totalLength / circleLength));
+        
+        // Draw Circle
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, -Math.PI / 2, -Math.PI / 2 + circleProgress * Math.PI * 2);
+        ctx.stroke();
+
+        const pentagramProgress = Math.max(0, (progress * totalLength - circleLength) / (totalLength - circleLength));
+        if (pentagramProgress > 0) {
+            ctx.beginPath();
+            const points = [];
+            for (let i = 0; i < 5; i++) {
+                points.push({
+                    x: this.x + this.radius * Math.cos(-Math.PI / 2 + i * 2 * Math.PI / 5),
+                    y: this.y + this.radius * Math.sin(-Math.PI / 2 + i * 2 * Math.PI / 5)
+                });
+            }
+            
+            const lines = [[0, 2], [2, 4], [4, 1], [1, 3], [3, 0]];
+            const totalPentagramLength = lines.reduce((acc, line) => {
+                const p1 = points[line[0]];
+                const p2 = points[line[1]];
+                return acc + Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            }, 0);
+
+            let drawnLength = 0;
+            let lengthToDraw = pentagramProgress * totalPentagramLength;
+
+            for (const line of lines) {
+                if (drawnLength >= lengthToDraw) break;
+                const p1 = points[line[0]];
+                const p2 = points[line[1]];
+                const segmentLength = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                
+                ctx.moveTo(p1.x, p1.y);
+                if (drawnLength + segmentLength <= lengthToDraw) {
+                    ctx.lineTo(p2.x, p2.y);
+                } else {
+                    const ratio = (lengthToDraw - drawnLength) / segmentLength;
+                    ctx.lineTo(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio);
+                }
+                drawnLength += segmentLength;
+            }
+            ctx.stroke();
+        }
+    }
+}
+const demonicSigils = new Pool(() => new DemonicSigilEffect(), 10);
+ 
+// ------------------- Weapon class (with baseCooldown, level + level table, pierce) ------------------- 
+class Weapon{ 
+  constructor(opts){ 
+    // opts: { id, name, icon, baseCooldown, baseDamage, speed, duration, fireFunc, levelTable } 
+    this.id = opts.id || "w"; 
+    this.name = opts.name || "W"; 
+    this.icon = opts.icon || this.name; 
+    this.baseCooldown = (opts.baseCooldown !== undefined) ? opts.baseCooldown : 1.0; 
+    this.baseDamage = (opts.baseDamage !== undefined) ? opts.baseDamage : 5; 
+    this.speed = (opts.speed !== undefined) ? opts.speed : 200; 
+    this.duration = (opts.duration !== undefined) ? opts.duration : 1; 
+    this.fireFunc = opts.fireFunc || (()=>{}); 
+    this.level = opts.level || 1; 
+    this.maxLevel = opts.maxLevel || 8; 
+    this.pierce = (opts.pierce !== undefined) ? opts.pierce : 0; // weapon-local pierce 
+    this.levelTable = opts.levelTable || {}; // map level -> function to apply effect 
+    this.desc = opts.desc || ""; 
+  } 
+ 
+  // called when player casts this weapon from slotIndex 
+  fire(playerRef, slotIndex){ 
+    // call specific fire function with weapon context 
+    this.fireFunc.call(this, playerRef, slotIndex); 
+  } 
+ 
+  // apply upgrade effects when leveling weapon itself 
+  applyLevelEffects(newLevel){ 
+    // apply any level-table side effects that mutate weapon data (like baseDamage, baseCooldown, pierce, etc) 
+    for(let l = this.level+1; l <= newLevel; l++){ 
+      const fn = this.levelTable[l]; 
+      if(typeof fn === "function") fn(this); 
+    } 
+    this.level = newLevel; 
+  } 
+ 
+  getDisplayLevel(){ return this.level; } 
+} 
+ 
+// ------------------- Weapon catalog (Wand implemented) ------------------- 
+// Wand level table per spec: 
+// L1 Fires at nearest enemy (this is default behavior) 
+// L2 Fires 1 more projectile 
+// L3 Cooldown reduced by 0.2 seconds (modify baseCooldown) 
+// L4 Fires 1 more projectile 
+// L5 Base Damage up by 10 
+// L6 Fires 1 more projectile 
+// L7 Passes through 1 more enemy (pierce +1) 
+// L8 Base Damage up by 10 
+ 
+function getWeaponAdjustedStats(weapon) { 
+  const s = player.stats; 
+ 
+  const mightMult = 1 + (s["Might"] || 0) / 100; 
+  const areaMult = 1 + (s["Area"] || 0) / 100; 
+  const speedMult = 1 + (s["Speed"] || 0) / 100; 
+  const durationMult = 1 + (s["Duration"] || 0) / 100; 
+  const cooldownMult = Math.max(0.2, 1 - (s["Cooldown"] || 0) / 100); // cannot go below 20% base time 
+  const amountBonus = Math.floor(s["Amount"] || 0); // number of extra projectiles 
+ 
+  return { 
+    damage: weapon.baseDamage * mightMult, 
+    cooldown: weapon.baseCooldown * cooldownMult, 
+    projectileSpeed: weapon.speed * speedMult, 
+    projectileSize: weapon.size ? weapon.size * areaMult : 1 * areaMult, 
+    duration: weapon.duration * durationMult, 
+    amount: 1 + amountBonus, 
+    pierce: weapon.pierce || 0 
+  }; 
+} 
+ 
+function formatStatValue(stat, value) { 
+  const meta = STAT_META[stat]; 
+  if (!meta) return value; 
+  if (meta.type === "percent") return `${value.toFixed(0)}%`; 
+  if (meta.storeDecimals) return Math.floor(value); 
+  return value; 
+} 
+ 
+function wandFire(playerRef, slotIndex) { 
+  const w = this; 
+ 
+  // ====== Compute adjusted stats from player ====== 
+  const mightMult = 1 + (playerRef.stats["Might"] || 0) / 100; 
+  const areaMult = 1 + (playerRef.stats["Area"] || 0) / 100; 
+  const speedMult = 1 + (playerRef.stats["Speed"] || 0) / 100; 
+  const durationMult = 1 + (playerRef.stats["Duration"] || 0) / 100; 
+  const cooldownMult = Math.max(0.2, 1 - (playerRef.stats["Cooldown"] || 0) / 100); // 20% min cooldown 
+  const amountBonus = Math.floor(playerRef.stats["Amount"] || 0); 
+ 
+  // ====== Determine projectile count (base + level bonuses + stat bonus) ====== 
+  let amount = 1 + amountBonus; 
+  const extraFromLevel = ((w.level >= 2 ? 1 : 0) + (w.level >= 4 ? 1 : 0) + (w.level >= 6 ? 1 : 0)); 
+  amount += extraFromLevel; 
+ 
+  // ====== Prepare target selection ====== 
+  const sortedEnemies = [...enemies.active].sort((a, b) => 
+    ((a.x - playerRef.x) ** 2 + (a.y - playerRef.y) ** 2) - 
+    ((b.x - playerRef.x) ** 2 + (b.y - playerRef.y) ** 2) 
+  ); 
+  const targeted = new Set(); 
+ 
+  // ====== Fire projectiles ====== 
+  for (let i = 0; i < amount; i++) { 
+    const target = sortedEnemies.find(e => !targeted.has(e)) || sortedEnemies[0] || null; 
+    if (target) targeted.add(target); 
+ 
+    const proj = projectiles.spawn(); 
+ 
+    // Damage and projectile properties affected by stats 
+    const finalDamage = w.baseDamage * mightMult; 
+    const projSpeed = (w.speed || 200) * speedMult; 
+    const projDuration = (w.duration || 1) * durationMult; 
+    const pierce = w.pierce || 0; 
+ 
+    // Determine direction 
+    let angle = playerRef.angle; 
+    if (target) angle = Math.atan2(target.y - playerRef.y, target.x - playerRef.x); 
+ 
+    proj.spawn(playerRef.x, playerRef.y, angle, projSpeed, projDuration, finalDamage, pierce); 
+ 
+    // Apply Area scaling (size multiplier) 
+    if (proj.r) proj.r *= areaMult; 
+ 
+    // Assign target for homing behavior 
+    proj.target = target || null; 
+  } 
+ 
+  // ====== Apply cooldown (stat-modified) ====== 
+  w.cooldownTimer = w.baseCooldown * cooldownMult; 
+} 
+ 
+ 
+ 
+ 
+ 
+// Create the wand weapon template and a catalog 
+const weaponsCatalog = { 
+  wand: new Weapon({ 
+    id: "wand", 
+    name: "Wand", 
+    icon: "🪄", 
+    baseCooldown: 1.5, 
+    baseDamage: 5, 
+    speed: 250, 
+    duration: 1, 
+    fireFunc: wandFire, 
+    level: 1, 
+    maxLevel: 8, 
+    pierce: 0, 
+    desc: "Magic Wand: homing projectiles that target nearest enemies.", 
+    levelTable: { 
+      // define side-effect functions that mutate weapon properties when reaching that level 
+      1: (weapon)=>{ /* L1: baseline, already defaults to nearest targeting */ }, 
+      2: (weapon)=>{ /* L2: +1 projectile handled when firing */ }, 
+      3: (weapon)=>{ weapon.baseCooldown = Math.max(0.05, (weapon.baseCooldown || 1.5) - 0.2); }, 
+      4: (weapon)=>{ /* L4: +1 projectile */ }, 
+      5: (weapon)=>{ weapon.baseDamage = (weapon.baseDamage||5) + 10; }, 
+      6: (weapon)=>{ /* L6: +1 projectile */ }, 
+      7: (weapon)=>{ weapon.pierce = (weapon.pierce||0) + 1; }, 
+      8: (weapon)=>{ weapon.baseDamage = (weapon.baseDamage||5) + 10; } 
+    } 
+  }), 
+hallowed_ground: new Weapon({
+    id: "hallowed_ground",
+    name: "Hallowed Ground",
+    icon: "⚗️",
+    baseCooldown: 2.5,
+    baseDamage: 3,
+    fireFunc: hallowedGroundFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Creates damaging zones on the ground.",
+    levelTable: {
+        2: w => { w.amount = (w.amount || 1) + 1; w.baseArea = (w.baseArea || 1) * 1.2; },
+        3: w => { w.duration = (w.duration || 2) + 0.5; w.baseDamage += 10; },
+        4: w => { w.amount = (w.amount || 1) + 1; w.baseArea = (w.baseArea || 1) * 1.2; },
+        5: w => { w.duration = (w.duration || 2) + 0.3; w.baseDamage += 10; },
+        6: w => { w.amount = (w.amount || 1) + 1; w.baseArea = (w.baseArea || 1) * 1.2; },
+        7: w => { w.duration = (w.duration || 2) + 0.3; w.baseDamage += 5; },
+        8: w => { w.baseArea = (w.baseArea || 1) * 1.2; w.baseDamage += 5; }
+    }
+}),
+thunderbolt: new Weapon({
+    id: "thunderbolt",
+    name: "Thunderbolt",
+    icon: "⚡",
+    baseCooldown: 2.0,
+    baseDamage: 15,
+    fireFunc: thunderboltFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Calls down a bolt of lightning on a random enemy.",
+    levelTable: {
+        2: w => { w.baseDamage += 5; },
+        3: w => { w.baseCooldown -= 0.2; },
+        4: w => { w.baseDamage += 5; },
+        5: w => { w.baseCooldown -= 0.2; },
+        6: w => { w.baseDamage += 10; },
+        7: w => { w.baseCooldown -= 0.2; },
+        8: w => { w.baseDamage += 10; }
+    }
+}),
+nova_pulse: new Weapon({
+    id: "nova_pulse",
+    name: "Nova Pulse",
+    icon: "💥",
+    baseCooldown: 3.0,
+    baseDamage: 10,
+    fireFunc: novaPulseFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Emits a damaging pulse that expands outwards.",
+    levelTable: {
+        2: w => { w.baseDamage += 5; },
+        3: w => { w.baseCooldown -= 0.3; },
+        4: w => { w.baseDamage += 5; },
+        5: w => { w.baseCooldown -= 0.3; },
+        6: w => { w.baseDamage += 10; },
+        7: w => { w.baseCooldown -= 0.3; },
+        8: w => { w.baseDamage += 10; }
+    }
+}),
+cross: new Weapon({
+    id: "cross",
+    name: "Cross",
+    icon: "✝️",
+    baseCooldown: 2.0,
+    baseDamage: 10,
+    speed: 150,
+    duration: 1.5,
+    fireFunc: crossFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Aims at the nearest enemy, has a boomerang effect.",
+    levelTable: {
+        2: w => { w.baseDamage += 10; },
+        3: w => { w.baseArea = (w.baseArea || 1) * 1.1; w.speed *= 1.25; },
+        4: w => { w.amount = (w.amount || 1) + 1; },
+        5: w => { w.baseDamage += 10; },
+        6: w => { w.baseArea = (w.baseArea || 1) * 1.1; w.speed *= 1.25; },
+        7: w => { w.amount = (w.amount || 1) + 1; },
+        8: w => { w.baseDamage += 10; }
+    }
+}),
+hurricane: new Weapon({
+    id: "hurricane",
+    name: "Hurricane",
+    icon: "🌪️",
+    baseCooldown: 5.0,
+    baseDamage: 10,
+    fireFunc: hurricaneFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Pulls a random enemy into a damaging orbit around you.",
+    levelTable: {
+        2: w => { w.amount = (w.amount || 1) + 1; },
+        3: w => { w.baseArea = (w.baseArea || 1) * 1.2; w.baseDamage += 5; },
+        4: w => { w.duration = (w.duration || 3) + 1; },
+        5: w => { w.amount = (w.amount || 1) + 1; },
+        6: w => { w.speed = (w.speed || 1) * 1.3; w.baseDamage += 5; },
+        7: w => { w.duration = (w.duration || 3) + 1; },
+        8: w => { w.amount = (w.amount || 1) + 1; }
+    }
+}),
+fire_wand: new Weapon({
+    id: "fire_wand",
+    name: "Fire Wand",
+    icon: "🔥",
+    baseCooldown: 2.0,
+    baseDamage: 15,
+    speed: 180,
+    duration: 1.5,
+    fireFunc: fireWandFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Fires at a random enemy, deals heavy damage.",
+    levelTable: {
+        2: w => { w.baseDamage += 10; },
+        3: w => { w.baseDamage += 10; w.speed *= 1.2; },
+        4: w => { w.baseDamage += 10; },
+        5: w => { w.baseDamage += 10; w.speed *= 1.2; },
+        6: w => { w.baseDamage += 10; },
+        7: w => { w.baseDamage += 10; w.speed *= 1.2; },
+        8: w => { w.baseDamage += 10; }
+    }
+}),
+sword: new Weapon({
+    id: "sword",
+    name: "Sword",
+    icon: "⚔️",
+    baseCooldown: 1.8,
+    baseDamage: 20,
+    fireFunc: swordFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Slashes closest enemies.",
+    baseArea: 1,
+    levelTable: {
+        2: w => { /* +1 projectile handled in fireFunc */ },
+        3: w => { w.baseDamage += 5; },
+        4: w => { w.baseArea *= 1.1; w.baseDamage += 5; },
+        5: w => { w.baseDamage += 5; },
+        6: w => { w.baseArea *= 1.1; w.baseDamage += 5; },
+        7: w => { w.baseDamage += 5; },
+        8: w => { w.baseDamage += 5; }
+    }
+}),
+demonic_sigil: new Weapon({
+    id: "demonic_sigil",
+    name: "Demonic Sigil",
+    icon: "🔯",
+    baseCooldown: 30,
+    baseDamage: 50,
+    fireFunc: demonicSigilFire,
+    level: 1,
+    maxLevel: 8,
+    desc: "Draws a powerful sigil that damages and slows enemies. Damage scales with Curse.",
+    baseArea: 1,
+    levelTable: {
+        2: w => { w.baseDamage += 20; },
+        3: w => { w.baseArea *= 1.15; },
+        4: w => { w.baseDamage += 20; },
+        5: w => { w.baseArea *= 1.15; },
+        6: w => { w.baseDamage += 30; },
+        7: w => { w.baseArea *= 1.2; },
+        8: w => { w.baseDamage += 30; }
+    }
+}),
+holy_wand: new Weapon({
+    id: "holy_wand",
+    name: "Holy Wand",
+    icon: "🪄",
+    baseCooldown: 0.75, // Half of Wand
+    baseDamage: 15, // Evolved damage
+    speed: 500, // Double of Wand
+    duration: 1.2,
+    fireFunc: holyWandFire,
+    level: 1,
+    maxLevel: 1, // Max level by default
+    isEvolved: true,
+    desc: "Fires a rapid sequence of projectiles. Never stops firing."
+})
+};
+
+const evolutionRecipes = {
+    "wand": {
+        passive: "arcane_sphere",
+        evolvedId: "holy_wand"
+    }
+};
+
+let thunderbolts = [];
+let novaPulses = [];
+
+function holyWandFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+    const mightMult = 1 + (playerRef.stats["Might"] || 0) / 100;
+    const speedMult = 1 + (playerRef.stats["Speed"] || 0) / 100;
+    const durationMult = 1 + (playerRef.stats["Duration"] || 0) / 100;
+
+    const sortedEnemies = [...enemies.active].sort((a, b) =>
+        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) -
+        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
+    );
+
+    const projectileDelay = 100; // 100ms between each projectile in the sequence
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            if (dead || paused) return;
+
+            const target = sortedEnemies[i] || sortedEnemies[0] || null;
+            const proj = projectiles.spawn();
+            
+            const finalDamage = w.baseDamage * mightMult;
+            const projSpeed = w.speed * speedMult;
+            const projDuration = w.duration * durationMult;
+
+            let angle = playerRef.angle;
+            if (target) {
+                angle = Math.atan2(target.y - playerRef.y, target.x - playerRef.x);
+            }
+
+            proj.spawn(playerRef.x, playerRef.y, angle, projSpeed, projDuration, finalDamage, w.pierce || 0, 'holy');
+            proj.target = target;
+        }, i * projectileDelay);
+    }
+}
+
+function demonicSigilFire(playerRef, slotIndex) {
+    const w = this;
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+    
+    // Special damage scaling: Might + Curse
+    const mightBonus = 1 + (playerRef.stats.Might / 100);
+    const curseBonus = 1 + (playerRef.stats.Curse / 100);
+    const damage = w.baseDamage * mightBonus * curseBonus;
+    
+    const sigil = demonicSigils.spawn();
+    sigil.spawn(playerRef.x, playerRef.y, 150 * area, damage);
+}
+
+function renderSwordSlash(effect) {
+    const progress = effect.elapsed / effect.duration;
+    const alpha = Math.sin(progress * Math.PI); // Fade in and out
+
+    ctx.save();
+    ctx.translate(effect.x, effect.y);
+    ctx.rotate(effect.angle);
+    ctx.globalAlpha = alpha;
+
+    const grad = ctx.createLinearGradient(-effect.width / 2, 0, effect.width / 2, 0);
+    grad.addColorStop(0, "rgba(255, 255, 255, 0)");
+    grad.addColorStop(0.5, "rgba(255, 255, 255, 0.8)");
+    grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+    
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+
+    ctx.restore();
+}
+
+function swordFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + (w.level >= 2 ? 1 : 0) + Math.floor(playerRef.stats["Amount"] || 0);
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const duration = 0.2; // Each slash lasts for 0.2s
+    const slashDelay = 150; // 150ms between slashes
+
+    const sortedEnemies = [...enemies.active].sort((a, b) =>
+        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) -
+        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
+    );
+
+    const target = sortedEnemies[0] || null;
+    const baseAngle = target ? Math.atan2(target.y - playerRef.y, target.x - playerRef.x) : playerRef.angle;
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            const angle = baseAngle + (i % 2 === 1 ? Math.PI : 0); // Alternate direction
+            const spawnDist = 40; // Spawn slash slightly in front of player
+            const x = playerRef.x + Math.cos(angle) * spawnDist;
+            const y = playerRef.y + Math.sin(angle) * spawnDist;
+
+            const slashWidth = 100 * area;
+            const slashHeight = 30 * area;
+
+            const effect = staticEffects.spawn();
+            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderSwordSlash);
+        }, i * slashDelay);
+    }
+}
+
+function fireWandFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+    const speed = w.speed * (1 + (playerRef.stats.Speed || 0) / 100);
+    const duration = w.duration * (1 + (playerRef.stats.Duration || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const area = 1 * (1 + (playerRef.stats.Area || 0) / 100);
+
+    const availableEnemies = enemies.active.filter(e => !EnemyTypes[e.type].isBoss);
+    if (availableEnemies.length > 0) {
+        const target = availableEnemies[Math.floor(Math.random() * availableEnemies.length)];
+        const angleToTarget = Math.atan2(target.y - playerRef.y, target.x - playerRef.x);
+
+        const arcSpread = Math.PI / 4 * area; // Base 45 degree arc, scaled by area
+        const angleStep = amount > 1 ? arcSpread / (amount - 1) : 0;
+        const startAngle = angleToTarget - arcSpread / 2;
+
+        for (let i = 0; i < amount; i++) {
+            const angle = startAngle + i * angleStep;
+            const p = fireballs.spawn();
+            p.spawn(playerRef.x, playerRef.y, angle, speed, duration, damage);
+        }
+    }
+}
+
+function hurricaneFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = (w.amount || 1) + Math.floor(playerRef.stats["Amount"] || 0);
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+    const duration = (w.duration || 3) * (1 + (playerRef.stats.Duration || 0) / 100);
+    const speed = (w.speed || 1) * (1 + (playerRef.stats.Speed || 0) / 100);
+
+    const availableEnemies = enemies.active.filter(e => !e.isOrbiting && !e.isPullingToOrbit && !EnemyTypes[e.type].isBoss);
+    for (let i = 0; i < amount; i++) {
+        if (availableEnemies.length > 0) {
+            const randIndex = Math.floor(Math.random() * availableEnemies.length);
+            const enemy = availableEnemies.splice(randIndex, 1)[0];
+            
+            enemy.isPullingToOrbit = true;
+            enemy.pullToOrbitTimer = 0.5; // 0.5 second pull-in time
+            enemy.orbitAngle = Math.random() * Math.PI * 2;
+            enemy.orbitDist = 100 * Math.sqrt(area);
+            enemy.orbitDuration = duration;
+            enemy.orbitSpeed = speed;
+            enemy.orbitDamage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+            enemy.orbitTrail = [];
+        }
+    }
+}
+
+function crossFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = (w.amount || 1) + Math.floor(playerRef.stats["Amount"] || 0);
+    const speed = w.speed * (1 + (playerRef.stats.Speed || 0) / 100);
+    const duration = w.duration * (1 + (playerRef.stats.Duration || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+
+    const sortedEnemies = [...enemies.active].sort((a, b) => 
+        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) - 
+        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
+    );
+
+    for (let i = 0; i < amount; i++) {
+        const target = sortedEnemies[i] || { x: playerRef.x + 1, y: playerRef.y }; // Fallback target
+        const angle = Math.atan2(target.y - playerRef.y, target.x - playerRef.x);
+        const p = crossProjectiles.spawn();
+        p.spawn(playerRef.x, playerRef.y, angle, speed, duration, damage, area);
+    }
+}
+
+function hallowedGroundFire(playerRef, slotIndex) {
+    const w = this;
+    if (w.lastAngle === undefined) {
+        w.lastAngle = 0;
+    }
+    const amount = (w.amount || 1) + Math.floor(playerRef.stats["Amount"] || 0);
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+    const duration = (w.duration || 2) * (1 + (playerRef.stats.Duration || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+
+    const angleIncrement = Math.PI / 3; // 60 degrees
+    const dist = 150;
+
+    for (let i = 0; i < amount; i++) {
+        const zone = damagingZones.spawn();
+        let x, y;
+        if (i === 0 && enemies.active.length > 0) {
+            let nearest = null;
+            let nd = Infinity;
+            for (const e of enemies.active) {
+                const d = Math.hypot(e.x - playerRef.x, e.y - playerRef.y);
+                if (d < nd) {
+                    nd = d;
+                    nearest = e;
+                }
+            }
+            x = nearest.x;
+            y = nearest.y;
+        } else {
+            w.lastAngle += angleIncrement;
+            const currentDist = dist + (Math.random() - 0.5) * 50;
+            x = playerRef.x + Math.cos(w.lastAngle) * currentDist;
+            y = playerRef.y + Math.sin(w.lastAngle) * currentDist;
+        }
+        zone.spawn(x, y, 50 * area, damage, duration);
+    }
+}
+// Function to clone a catalog weapon when giving it to player (to keep catalog intact) 
+function novaPulseFire(playerRef, slotIndex) {
+    const w = this;
+    const areaBonus = 1 + (playerRef.stats["Area"] || 0) / 100;
+    const mightBonus = 1 + (playerRef.stats["Might"] || 0) / 100;
+
+    novaPulses.push({
+        x: playerRef.x,
+        y: playerRef.y,
+        radius: 0,
+        maxRadius: 100 * areaBonus,
+        damage: w.baseDamage * mightBonus,
+        life: 0.5,
+        hitEnemies: new Set()
+    });
+}
+
+function thunderboltFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+
+    for (let i = 0; i < amount; i++) {
+        if (enemies.active.length > 0) {
+            const target = enemies.active[Math.floor(Math.random() * enemies.active.length)];
+            const mightBonus = 1 + (playerRef.stats["Might"] || 0) / 100;
+            const damage = w.baseDamage * mightBonus;
+
+            thunderbolts.push({
+                x: target.x,
+                y: target.y,
+                damage: damage,
+                timer: 0.3 
+            });
+        }
+    }
+}
+function renderThunderbolts() {
+    for (let i = thunderbolts.length - 1; i >= 0; i--) {
+        const bolt = thunderbolts[i];
+        const progress = 1 - (bolt.timer / 0.3); 
+
+        if (progress < 1) {
+            const startY = bolt.y - 200;
+            const endY = bolt.y;
+            const x = bolt.x;
+
+            ctx.save();
+            ctx.globalAlpha = Math.sin(progress * Math.PI); 
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
+            ctx.lineWidth = 4;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'yellow';
+
+            ctx.beginPath();
+            ctx.moveTo(x, startY);
+            
+            let currentY = startY;
+            while (currentY < endY) {
+                const nextY = Math.min(endY, currentY + Math.random() * 20 + 5);
+                const nextX = x + (Math.random() - 0.5) * 20;
+                ctx.lineTo(nextX, nextY);
+                currentY = nextY;
+            }
+            
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+}
+function renderNovaPulses() {
+    for (let i = novaPulses.length - 1; i >= 0; i--) {
+        const pulse = novaPulses[i];
+        const progress = 1 - (pulse.life / 0.5);
+
+        ctx.save();
+        ctx.globalAlpha = Math.sin(progress * Math.PI);
+        ctx.strokeStyle = 'rgba(255, 100, 100, 0.8)';
+        ctx.lineWidth = 5;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = 'red';
+
+        ctx.beginPath();
+        ctx.arc(pulse.x, pulse.y, pulse.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+function cloneWeaponTemplate(template){ 
+  const opts = { 
+    id: template.id, 
+    name: template.name, 
+    icon: template.icon, 
+    baseCooldown: template.baseCooldown, 
+    baseDamage: template.baseDamage, 
+    speed: template.speed, 
+    duration: template.duration, 
+    fireFunc: template.fireFunc, 
+    level: template.level, 
+    maxLevel: template.maxLevel, 
+    pierce: template.pierce, 
+    levelTable: template.levelTable, 
+    desc: template.desc 
+  }; 
+  return new Weapon(opts); 
+} 
+ 
+// ------------------- STAT METADATA ------------------- 
+const STAT_META = { 
+  "Max Health": { type: "fixed" }, 
+  "Recovery": { type: "fixed" }, 
+  "Armor": { type: "fixed", storeDecimals: true }, 
+  "Move Speed": { type: "fixed" }, 
+  "Might": { type: "percent" }, 
+  "Area": { type: "percent" }, 
+  "Speed": { type: "percent" }, 
+  "Duration": { type: "percent" }, 
+  "Amount": { type: "fixed", storeDecimals: true }, 
+  "Cooldown": { type: "percent" }, 
+  "Luck": { type: "percent" }, 
+  "Growth": { type: "percent" }, 
+  "Greed": { type: "percent" }, 
+  "Curse": { type: "percent" }, 
+  "Magnet": { type: "fixed" }, 
+  "Revival": { type: "fixed", storeDecimals: true } 
+}; 
+ 
+ 
+// ------------------- Level-up controller (modified to include weapons) ------------------- 
+const levelUpController = { 
+  showing:false, 
+  // total luck multiplier used for 4th option chance 
+  getTotalLuck(){ return 1 + (player.stats["Luck"]||0)/100; }, 
+  chanceFourth(){ const tl=this.getTotalLuck(); return 1 - (1 / tl); }, // same used previously 
+  // gather passives and weapon upgrade options into a single pool 
+  gatherPools(){ 
+    const passivePool = []; const freePassiveSlots = player.passiveSlots.filter(s=>!s).length; 
+    for(const p of passiveItems){ 
+      const lvl = player.passiveLevels[p.id]||0; 
+      const owned = lvl>0; 
+      const canUpgrade = owned && lvl < p.maxLevel; 
+      const canAdd = !owned && freePassiveSlots>0; 
+      if(canUpgrade || canAdd){ 
+        passivePool.push({ type:"passive", item:p, owned, level:lvl }); 
+      } 
+    } 
+ 
+    // weapon pool: include both weapons the player already has (upgrade candidates) and weapons not owned yet (new) 
+    const weaponPool = []; 
+    for(const k in weaponsCatalog){ 
+      const template = weaponsCatalog[k]; 
+      // detect if player owns an instance of this weapon 
+      let foundIndex = -1; 
+      for(let i=0;i<player.weaponSlots.length;i++){ 
+        const w = player.weaponSlots[i]; 
+        if(w && w.id === template.id){ foundIndex = i; break; } 
+      } 
+      if(foundIndex >= 0){ 
+        const ownedWeapon = player.weaponSlots[foundIndex]; 
+        if(ownedWeapon.level < ownedWeapon.maxLevel){ 
+          weaponPool.push({ type:"weapon", item:ownedWeapon, owned:true, slotIndex:foundIndex }); 
+        } 
+      } else { 
+        // player doesn't have this weapon: offer as new if there is a free weapon slot 
+        const freeWeaponSlots = player.weaponSlots.filter(s=>!s).length; 
+        if(freeWeaponSlots > 0){ 
+          weaponPool.push({ type:"weapon_new", item:template, owned:false }); 
+        } 
+      } 
+    } 
+ 
+    return { passivePool, weaponPool }; 
+  }, 
+ 
+  // pick choices following rules: 
+  // - If pool has <3 options, show only available. 
+  // - If 3 or more exist, show 3. Luck may add a 4th. 
+  // - Try with high chance to include one you already have and one you don't, when possible. 
+  pickChoices(){ 
+    const { passivePool, weaponPool } = this.gatherPools(); 
+    const totalPool = [...passivePool, ...weaponPool]; 
+ 
+    if(totalPool.length === 0) return []; 
+ 
+    // determine count 
+    let count = Math.min(3, totalPool.length); 
+    if(totalPool.length > count){ 
+      if(Math.random() < this.chanceFourth()) count = Math.min(totalPool.length, 4); 
+    } 
+ 
+    // attempt to include one owned and one new if possible 
+    const owned = totalPool.filter(x => x.owned); 
+    const fresh = totalPool.filter(x => !x.owned); 
+    const result = []; 
+ 
+    // Heuristic: 80% chance to include one owned if available and one new if available 
+    if(owned.length > 0 && fresh.length > 0 && count >= 2){ 
+      if(Math.random() < 0.8){ 
+        result.push(randPickAndRemove(owned)); 
+        result.push(randPickAndRemove(fresh)); 
+      } 
+    } 
+ 
+    // fill the rest randomly but try to avoid duplicates 
+    const remaining = shuffleArray(totalPool.filter(v => !result.includes(v))); 
+    for(const v of remaining){ 
+      if(result.length >= count) break; 
+      result.push(v); 
+    } 
+ 
+    // convert result into displayable items (map to normalized object) 
+    return result.slice(0, count).map(r => { 
+      if(r.type === "passive") return { kind:"passive", data:r.item, owned:r.owned }; 
+      if(r.type === "weapon") return { kind:"weapon", data:r.item, owned:true, slotIndex:r.slotIndex }; 
+      if(r.type === "weapon_new") return { kind:"weapon_new", data:r.item, owned:false }; 
+      return null; 
+    }).filter(x=>x); 
+  }, 
+ 
+  onLevelUp(){ 
+    const choices = this.pickChoices(); 
+    if(choices.length === 0) return; 
+    this.showChoices(choices); 
+  }, 
+ 
+  showChoices(choices){ 
+    audioManager.play('level_up');
+    paused = true; this.showing = true; 
+    const el = document.getElementById("levelUpScreen"); 
+    const container = document.getElementById("levelChoices"); 
+    container.innerHTML = ""; 
+    el.style.display = "flex"; el.setAttribute("aria-hidden","false"); 
+    updatePassiveSlotsUI(); updateInventoryUI(); 
+ 
+    for(const choice of choices){ 
+      const box = document.createElement("div"); box.className = "card"; 
+      const icon = document.createElement("div"); icon.className = "card-icon"; 
+      const type = document.createElement("div"); type.className = "card-type"; 
+      const title = document.createElement("div"); title.className = "card-title"; 
+      const desc = document.createElement("div"); desc.className = "card-desc"; 
+      const newBadge = document.createElement("div"); 
+ 
+      if(choice.kind === "passive"){ 
+        const item = choice.data; 
+        icon.textContent = item.icon; 
+        type.textContent = "PASSIVE"; 
+        title.textContent = `${item.name} LV ${(player.passiveLevels[item.id]||0) + 1}`; 
+        desc.textContent = item.descLvl(item.value); 
+        if(!(player.passiveLevels[item.id]||0)) { newBadge.className="card-new"; newBadge.textContent="NEW!"; } 
+        box.onclick = ()=>{ this.applyChoice(choice); }; 
+      } else if(choice.kind === "weapon" || choice.kind === "weapon_new"){ 
+        // weapon entry: show basic description and next-level description 
+        const templOrInst = choice.data; 
+        let displayName = templOrInst.name || templOrInst.id || "Weapon"; 
+        icon.textContent = templOrInst.icon || displayName[0]; 
+        type.textContent = "WEAPON"; 
+        if(choice.owned){ 
+          // owned weapon instance 
+          const inst = templOrInst; 
+          title.textContent = `${inst.name} LV ${Math.min(inst.level+1, inst.maxLevel)}`; 
+          desc.textContent = weaponNextLevelDescription(inst); 
+        } else { 
+          // new weapon (template) 
+          const templ = templOrInst; 
+          title.textContent = `${templ.name} LV 1`; 
+          desc.textContent = templ.desc || "New weapon."; 
+          newBadge.className="card-new"; newBadge.textContent="NEW!"; 
+        } 
+        box.onclick = ()=>{ this.applyChoice(choice); }; 
+      } 
+ 
+      box.appendChild(icon); box.appendChild(type); box.appendChild(title); box.appendChild(desc); 
+      if(newBadge) box.appendChild(newBadge); 
+      container.appendChild(box); 
+    } 
+  }, 
+ 
+  hideChoices(){ 
+    this.showing=false; 
+    const el=document.getElementById("levelUpScreen"); 
+    el.style.display="none"; el.setAttribute("aria-hidden","true"); 
+    paused=false; 
+    updatePassiveSlotsUI(); updateInventoryUI(); 
+  }, 
+ 
+  applyChoice(choice){ 
+    if(choice.kind === "passive"){ 
+      const p = passiveMap[choice.data.id]; if(!p) return; 
+      const lvl = player.passiveLevels[p.id]||0; 
+      const newLvl = Math.min(p.maxLevel, lvl+1); 
+      player.passiveLevels[p.id] = newLvl; 
+      if(!player.passiveSlots.includes(p.id)){ 
+        for(let i=0;i<player.passiveSlots.length;i++){ if(!player.passiveSlots[i]){ player.passiveSlots[i] = p.id; break; } } 
+      } 
+      this.applyStat(p.stat, p.value); 
+      this.hideChoices(); 
+      return; 
+    } 
+ 
+    if(choice.kind === "weapon_new"){ 
+      // give player cloned weapon into first free weapon slot 
+      const templ = choice.data; 
+      const freeIdx = player.weaponSlots.findIndex(s=>!s); 
+      if(freeIdx >= 0){ 
+        const clone = cloneWeaponTemplate(templ); 
+        // apply level 1 effects (if table defines L1 side-effects) 
+        clone.applyLevelEffects(Math.min(clone.level, clone.maxLevel)); 
+        player.weaponSlots[freeIdx] = clone; 
+      } 
+      this.hideChoices(); 
+      return; 
+    } 
+ 
+    if(choice.kind === "weapon"){ 
+      const inst = choice.data; 
+      const curLevel = inst.level || 1; 
+      const newLevel = Math.min(inst.maxLevel, curLevel + 1); 
+      if(newLevel > curLevel){ 
+        // Apply effects first, which also updates the level internally
+        inst.applyLevelEffects(newLevel); 
+      } 
+      this.hideChoices(); 
+    } 
+ 
+  }, 
+ 
+  applyStat(statName, value) { 
+    const meta = STAT_META[statName] || { type: "fixed" }; 
+    const oldVal = player.stats[statName] || 0; 
+    let newVal = oldVal + value; 
+ 
+    if (meta.storeDecimals) { 
+      // stats like Armor, Amount, Revival: accumulate decimals but only apply integer parts 
+      const applied = Math.floor(newVal); 
+      player.stats[statName] = newVal; // store decimal internally 
+      // update effective gameplay stat (like armor reduction or projectile count) 
+      if (["Armor", "Amount", "Revival"].includes(statName)) { 
+        player[`effective_${statName}`] = applied; 
+      } 
+    } else { 
+      player.stats[statName] = newVal; 
+    } 
+ 
+    // specific stat effects 
+    switch (statName) { 
+      case "Max Health": 
+        player.maxhp = newVal; 
+        player.hp = Math.min(player.hp + value, player.maxhp); 
+        break; 
+      case "Move Speed": 
+        player.moveSpeed = newVal; 
+        break; 
+      case "Recovery": 
+        player.recovery = newVal; 
+        break; 
+    } 
+ 
+    updateInventoryUI(); 
+    updatePassiveSlotsUI(); 
+  } 
+}; 
+ 
+// helper: returns textual description of the next level for a weapon instance 
+const chestController = {
+    isOpening: false,
+    rewards: [],
+    animationIntervals: [],
+
+    openChest() {
+        this.isOpening = true;
+        paused = true;
+        this.rewards = this.determineRewards();
+        
+        document.getElementById('chestScreen').style.display = 'flex';
+        document.getElementById('skipChestBtn').style.display = 'block';
+        document.getElementById('closeChestBtn').style.display = 'none';
+        document.getElementById('chestRewards').innerHTML = '';
+        document.getElementById('chestAnimation').innerHTML = ''; 
+
+        this.startAnimation();
+
+        document.getElementById('skipChestBtn').onclick = () => this.endAnimation(true);
+        document.getElementById('closeChestBtn').onclick = () => this.closeChest();
+    },
+
+    determineRewards() {
+        // Check for evolutions first
+        for (let i = 0; i < player.weaponSlots.length; i++) {
+            const weapon = player.weaponSlots[i];
+            if (weapon && weapon.level === weapon.maxLevel) {
+                const recipe = evolutionRecipes[weapon.id];
+                if (recipe && player.passiveSlots.includes(recipe.passive)) {
+                    return [{ type: 'evolution', weaponIndex: i, recipe: recipe }];
+                }
+            }
+        }
+
+        // If no evolution, determine rewards as normal
+        const luck = 1 + (player.stats.Luck / 100);
+        let numRewards = 1;
+        if (Math.random() * luck > 1.5) numRewards = 3;
+        if (Math.random() * luck > 2.5) numRewards = 5;
+
+        const upgradeableWeapons = player.weaponSlots.filter(w => w && w.level < w.maxLevel);
+        const upgradeablePassives = player.passiveSlots.filter(p => p && player.passiveLevels[p] < passiveMap[p].maxLevel);
+        const possibleUpgrades = [...upgradeableWeapons, ...upgradeablePassives.map(p => passiveMap[p])];
+
+        let rewards = [];
+        for (let i = 0; i < numRewards; i++) {
+            if (possibleUpgrades.length > 0) {
+                const randIndex = Math.floor(Math.random() * possibleUpgrades.length);
+                rewards.push(possibleUpgrades.splice(randIndex, 1)[0]);
+            } else {
+                const greed = 1 + (player.stats.Greed / 100);
+                rewards.push({ type: 'gold', amount: Math.floor((100 + Math.random() * 400) * greed) });
+            }
+        }
+        return rewards;
+    },
+
+    startAnimation() {
+        const animationContainer = document.getElementById('chestAnimation');
+        animationContainer.innerHTML = '<div class="reel-container"></div>';
+        const reelContainer = animationContainer.querySelector('.reel-container');
+
+        const allIcons = [
+            ...Object.values(weaponsCatalog).map(w => w.icon),
+            ...passiveItems.map(p => p.icon),
+            '💰'
+        ];
+
+        for (let i = 0; i < this.rewards.length; i++) {
+            const reel = document.createElement('div');
+            reel.className = 'reel';
+            const spinner = document.createElement('div');
+            spinner.className = 'reel-spinner';
+            reel.appendChild(spinner);
+            reelContainer.appendChild(reel);
+
+            const shuffledIcons = shuffleArray(allIcons);
+            for (const icon of shuffledIcons) {
+                const item = document.createElement('div');
+                item.className = 'reel-item';
+                item.textContent = icon;
+                spinner.appendChild(item);
+            }
+            
+            let pos = 0;
+            const interval = setInterval(() => {
+                pos -= 100;
+                if (pos <= -(shuffledIcons.length * 100)) {
+                    pos = 0;
+                }
+                spinner.style.top = `${pos}px`;
+            }, 50);
+            this.animationIntervals.push({ interval, spinner, shuffledIcons, reel });
+        }
+        
+        // Staggered stop
+        this.rewards.forEach((reward, i) => {
+            setTimeout(() => {
+                this.stopReel(i);
+            }, 2000 + i * 500);
+        });
+
+        // Final stop
+        setTimeout(() => this.endAnimation(false), 2000 + this.rewards.length * 500);
+    },
+
+    stopReel(index) {
+        if (!this.animationIntervals[index]) return;
+
+        const { interval, spinner, shuffledIcons, reel } = this.animationIntervals[index];
+        clearInterval(interval);
+        
+        const reward = this.rewards[index];
+        let rewardIcon = '💰';
+        if (reward.id) {
+            rewardIcon = reward.icon;
+        }
+
+        const iconIndex = shuffledIcons.indexOf(rewardIcon);
+        const finalPos = -iconIndex * 100;
+
+        spinner.style.transition = 'top 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
+        spinner.style.top = `${finalPos}px`;
+        
+        this.animationIntervals[index] = null;
+    },
+
+    endAnimation(skipped = false) {
+        this.animationIntervals.forEach((anim, i) => {
+            if (anim) {
+                clearInterval(anim.interval);
+                if (skipped) {
+                    this.stopReel(i);
+                }
+            }
+        });
+        this.animationIntervals = [];
+
+        document.getElementById('skipChestBtn').style.display = 'none';
+        document.getElementById('closeChestBtn').style.display = 'block';
+        
+        setTimeout(() => this.displayRewards(), skipped ? 0 : 500);
+    },
+
+    displayRewards() {
+        const rewardsContainer = document.getElementById('chestRewards');
+        rewardsContainer.innerHTML = '';
+        for (const reward of this.rewards) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            const icon = document.createElement('div');
+            icon.className = 'card-icon';
+            const title = document.createElement('div');
+            title.className = 'card-title';
+
+            if (reward.type === 'evolution') {
+                const evolvedWeapon = cloneWeaponTemplate(weaponsCatalog[reward.recipe.evolvedId]);
+                player.weaponSlots[reward.weaponIndex] = evolvedWeapon;
+                icon.textContent = evolvedWeapon.icon;
+                title.textContent = evolvedWeapon.name;
+                card.style.borderColor = 'gold'; // Special border for evolution
+            } else if (reward.type === 'gold') {
+                icon.textContent = '💰';
+                title.textContent = `Gold x${reward.amount}`;
+                player.coins += reward.amount;
+            } else if (reward.id) { // Weapon or Passive
+                if (reward.fireFunc) { // Weapon
+                    const weapon = player.weaponSlots.find(w => w && w.id === reward.id);
+                    const newLevel = Math.min(weapon.maxLevel, weapon.level + 1);
+                    weapon.applyLevelEffects(newLevel);
+                    icon.textContent = weapon.icon;
+                    title.textContent = `${weapon.name} LV ${weapon.level}`;
+                } else { // Passive
+                    player.passiveLevels[reward.id]++;
+                    levelUpController.applyStat(reward.stat, reward.value);
+                    icon.textContent = reward.icon;
+                    title.textContent = `${reward.name} LV ${player.passiveLevels[reward.id]}`;
+                }
+            }
+            card.appendChild(icon);
+            card.appendChild(title);
+            rewardsContainer.appendChild(card);
+        }
+        updateInventoryUI();
+    },
+
+    closeChest() {
+        this.isOpening = false;
+        paused = false;
+        document.getElementById('chestScreen').style.display = 'none';
+    }
+};
+
+function weaponNextLevelDescription(inst){ 
+  const cur = inst.level || 1; 
+  const next = Math.min(inst.maxLevel, cur + 1); 
+  const table = inst.levelTable || {}; 
+ 
+  if (table[next]) { 
+ 
+    // ---- Magic Wand ---- 
+    if (inst.id === "wand") { 
+      switch (next) { 
+        case 2: return "Fires +1 projectile (targets an additional nearest enemy)."; 
+        case 3: return "Base cooldown reduced by 0.2s (modifies weapon base cooldown)."; 
+        case 4: return "Fires +1 projectile."; 
+        case 5: return "Base damage +10."; 
+        case 6: return "Fires +1 projectile."; 
+        case 7: return "Projectile pierce +1 (can pass through one more enemy + smart chaining)."; 
+        case 8: return "Base damage +10."; 
+        default: return "Targets the nearest enemy."; 
+      } 
+    } 
+ 
+    if (inst.id === "hallowed_ground") {
+        switch (next) {
+            case 2: return "Fires 1 more projectile. Base Area up by 20%.";
+            case 3: return "Effect lasts 0.5 seconds longer. Base Damage up by 10.";
+            case 4: return "Fires 1 more projectile. Base Area up by 20%.";
+            case 5: return "Effect lasts 0.3 seconds longer. Base Damage up by 10.";
+            case 6: return "Fires 1 more projectile. Base Area up by 20%.";
+            case 7: return "Effect lasts 0.3 seconds longer. Base Damage up by 5.";
+            case 8: return "Base Area up by 20%. Base Damage up by 5.";
+            default: return "Generates damaging zones.";
+        }
+    }
+
+    if (inst.id === "nova_pulse") {
+      switch (next) {
+        case 2: return "Base damage +5.";
+        case 3: return "Cooldown -0.3s.";
+        case 4: return "Base damage +5.";
+        case 5: return "Cooldown -0.3s.";
+        case 6: return "Base damage +10.";
+        case 7: return "Cooldown -0.3s.";
+        case 8: return "Base damage +10.";
+        default: return "Emits a damaging pulse.";
+      }
+    }
+
+    if (inst.id === "thunderbolt") {
+      switch (next) {
+        case 2: return "Base damage +5.";
+        case 3: return "Cooldown -0.2s.";
+        case 4: return "Base damage +5.";
+        case 5: return "Cooldown -0.2s.";
+        case 6: return "Base damage +10.";
+        case 7: return "Cooldown -0.2s.";
+        case 8: return "Base damage +10.";
+        default: return "Calls a lightning strike on a random enemy.";
+      }
+    }
+
+    if (inst.id === "cross") {
+        switch (next) {
+            case 2: return "Base Damage +10.";
+            case 3: return "Area +10%, Speed +25%.";
+            case 4: return "Fires +1 projectile.";
+            case 5: return "Base Damage +10.";
+            case 6: return "Area +10%, Speed +25%.";
+            case 7: return "Fires +1 projectile.";
+            case 8: return "Base Damage +10.";
+            default: return "Aims at nearest enemy, has boomerang effect.";
+        }
+    }
+
+    if (inst.id === "hurricane") {
+        switch (next) {
+            case 2: return "Pulls +1 enemy.";
+            case 3: return "Area +20%, Base Damage +5.";
+            case 4: return "Duration +1s.";
+            case 5: return "Pulls +1 enemy.";
+            case 6: return "Speed +30%, Base Damage +5.";
+            case 7: return "Duration +1s.";
+            case 8: return "Pulls +1 enemy.";
+            default: return "Pulls a random enemy into a damaging orbit around you.";
+        }
+    }
+
+    if (inst.id === "fire_wand") {
+        switch (next) {
+            case 2: return "Base Damage +10.";
+            case 3: return "Base Damage +10. Base Speed up by 20%.";
+            case 4: return "Base Damage +10.";
+            case 5: return "Base Damage +10. Base Speed up by 20%.";
+            case 6: return "Base Damage +10.";
+            case 7: return "Base Damage +10. Base Speed up by 20%.";
+            case 8: return "Base Damage +10.";
+            default: return "Fires at a random enemy, deals heavy damage.";
+        }
+    }
+
+    if (inst.id === "sword") {
+        switch (next) {
+            case 2: return "Fires 1 more projectile.";
+            case 3: return "Base Damage +5.";
+            case 4: return "Base Area +10%. Base Damage +5.";
+            case 5: return "Base Damage +5.";
+            case 6: return "Base Area +10%. Base Damage +5.";
+            case 7: return "Base Damage +5.";
+            case 8: return "Base Damage +5.";
+            default: return "Slashes closest enemies.";
+        }
+    }
+
+    if (inst.id === "demonic_sigil") {
+        switch (next) {
+            case 2: return "Base Damage +20.";
+            case 3: return "Area +15%.";
+            case 4: return "Base Damage +20.";
+            case 5: return "Area +15%.";
+            case 6: return "Base Damage +30.";
+            case 7: return "Area +20%.";
+            case 8: return "Base Damage +30.";
+            default: return "Draws a powerful sigil that damages and slows enemies. Damage scales with Curse.";
+        }
+    }
+
+    // ---- Fallback for other weapons ---- 
+    return "Weapon upgrade."; 
+  } 
+ 
+  return "Upgrade."; 
+} 
+ 
+ 
+// ------------------- UI helpers (kept) ------------------- 
+function randPickAndRemove(arr){ const idx = Math.floor(Math.random()*arr.length); return arr.splice(idx,1)[0]; } 
+function shuffleArray(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; } 
+// ------------------- Enemy types & enemy pool ------------------- 
+const EnemyTypes={ 
+    goblin:{hp:6,dmg:6,armor:1,speed:80,size:12,xpValue:0.8, color: '#8fbc8f'}, 
+    orc:{hp:60,dmg:9,armor:3,speed:60,size:18,xpValue:2.5, color: '#d2691e'},
+    bat:{hp:4,dmg:5,armor:0,speed:120,size:8,xpValue:0.5, color: '#a9a9a9'},
+    skeleton:{hp:25,dmg:10,armor:2,speed:70,size:14,xpValue:1.5, color: '#f5f5dc'},
+    golem:{hp:150,dmg:12,armor:5,speed:40,size:24,xpValue:5, color: '#708090'},
+    ogre_boss:{hp:800,dmg:15,armor:10,speed:50,size:32,xpValue:50, isBoss: true, color: '#dc143c'},
+    sprinter: {hp: 10, dmg: 8, armor: 0, speed: 180, size: 10, xpValue: 1.2, color: '#add8e6'},
+    tank: {hp: 120, dmg:10, armor: 5, speed: 30, size: 22, xpValue: 4, color: '#a52a2a'}
+}; 
+ 
+class Enemy { 
+  constructor(type = "goblin") { 
+    this.type = type; 
+    const t = EnemyTypes[type]; 
+ 
+    // Core stats 
+    this.maxhp = t.hp; 
+    this.hp = t.hp; 
+    this.dmg = t.dmg; 
+    this.armor = t.armor; 
+    this.baseSpd = t.speed; 
+    this.r = t.size; 
+ 
+    // Position 
+    this.x = 0; 
+    this.y = 0; 
+ 
+    // Hit feedback & debuffs 
+    this.hitFlash = 0;     // visual flash timer (seconds) 
+    this.slowTimer = 0;    // slow duration 
+    this.slowFactor = 1;   // movement multiplier 
+
+    // Hurricane properties
+    this.isOrbiting = false;
+    this.orbitAngle = 0;
+    this.orbitDist = 0;
+    this.orbitDuration = 0;
+    this.orbitSpeed = 0;
+    this.isPullingToOrbit = false;
+    this.pullToOrbitTimer = 0;
+    this.orbitTrail = [];
+  } 
+ 
+  spawn(px, py) { 
+    const ang = Math.random() * Math.PI * 2; 
+    const dist = 400 + Math.random() * 300; 
+    this.x = px + Math.cos(ang) * dist; 
+    this.y = py + Math.sin(ang) * dist; 
+ 
+    const curse = 1 + (player.stats.Curse / 100);
+    const minute = Math.floor(gameTime / 60);
+    const hpTimeScaling = 1 + minute * 0.25; // +25% HP per minute
+    const dmgTimeScaling = 1 + minute * 0.05; // +5% DMG per minute
+
+    this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 10 : 1);
+    this.dmg = this.dmg * curse * dmgTimeScaling;
+    this.hitFlash = 0; 
+    this.slowTimer = 0; 
+    this.slowFactor = 1;
+    this.isOrbiting = false;
+    this.isPullingToOrbit = false;
+    this.orbitTrail = [];
+  } 
+ 
+  update(dt) { 
+    if (paused || dead) return; 
+
+    if (this.isPullingToOrbit) {
+        this.pullToOrbitTimer -= dt;
+        const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
+        const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+        this.x += (targetX - this.x) * 0.1;
+        this.y += (targetY - this.y) * 0.1;
+
+        if (this.pullToOrbitTimer <= 0) {
+            this.isPullingToOrbit = false;
+            this.isOrbiting = true;
+        }
+        return;
+    }
+
+    if (this.isOrbiting) {
+        this.orbitAngle += 3 * this.orbitSpeed * dt;
+        this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
+        this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+
+        this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
+        for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
+            this.orbitTrail[i].life -= dt;
+            if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
+        }
+
+        for (const e of enemies.active) {
+            if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
+                const finalDmg = Math.max(1, this.orbitDamage - e.armor);
+                e.hp -= finalDmg;
+                e.hitFlash = 0.2;
+            }
+        }
+
+        for (const b of breakables.active) {
+            if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
+                b.destroy();
+            }
+        }
+
+        this.orbitDuration -= dt;
+        if (this.orbitDuration <= 0) {
+            this.isOrbiting = false;
+            const finalDmg = Math.max(1, this.orbitDamage * 2); // Final damage burst
+            this.hp -= finalDmg;
+            this.hitFlash = 0.5;
+        }
+        return; // Skip normal behavior
+    }
+ 
+    // ----- Hit flash decay (FIXED: dt belongs here) ----- 
+    if (this.hitFlash > 0) { 
+      this.hitFlash -= dt; 
+      if (this.hitFlash < 0) this.hitFlash = 0; 
+    } 
+ 
+    // ----- Slow decay ----- 
+    if (this.slowTimer > 0) { 
+      this.slowTimer -= dt; 
+      if (this.slowTimer <= 0) { 
+        this.slowFactor = 1; 
+      } 
+    } 
+ 
+    // ----- Movement ----- 
+    const dx = player.x - this.x; 
+    const dy = player.y - this.y; 
+    const d = Math.hypot(dx, dy) || 1; 
+ 
+    const effectiveSpeed = this.baseSpd * this.slowFactor; 
+    this.x += (dx / d) * effectiveSpeed * dt; 
+    this.y += (dy / d) * effectiveSpeed * dt; 
+ 
+    // ----- Separation ----- 
+    for (const e of enemies.active) { 
+      if (e === this) continue; 
+      const dx2 = e.x - this.x; 
+      const dy2 = e.y - this.y; 
+      const dist = Math.hypot(dx2, dy2); 
+      if (dist < e.r + this.r && dist > 0) { 
+        const push = 0.5 * (e.r + this.r - dist) / dist; 
+        this.x -= dx2 * push; 
+        this.y -= dy2 * push; 
+      } 
+    } 
+ 
+    // ----- Player collision damage ----- 
+    if (d < this.r + player.r && player.invuln <= 0) { 
+      const damage = Math.max(1, this.dmg - player.stats.Armor);
+      player.hp -= damage; 
+      player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow); 
+      player.invuln = 0.2; 
+ 
+      const h = hitmarks.spawn(); 
+      h.spawn(this.x, this.y, damage, "#f00"); 
+    } 
+ 
+    // ----- Death ----- 
+    if (this.hp <= 0) { 
+      dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
+      const luck = 1 + (player.stats.Luck / 100);
+      if (Math.random() < 0.01 * luck) {
+        const p = pickups.spawn();
+        p.spawn(this.x, this.y, 'coin');
+      }
+      if (EnemyTypes[this.type].isBoss) {
+        const p = pickups.spawn();
+        p.spawn(this.x, this.y, 'chest');
+      }
+      enemies.recycle(this); 
+    } 
+  } 
+ 
+  render() { 
+    if (this.isOrbiting) {
+        for (const p of this.orbitTrail) {
+            ctx.fillStyle = `rgba(200, 200, 255, ${p.life / 0.2 * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, this.r * (p.life / 0.2), 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    ctx.fillStyle = this.hitFlash > 0 ? "#fff" : EnemyTypes[this.type].color; 
+    ctx.beginPath(); 
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2); 
+    ctx.fill(); 
+  } 
+} 
+ 
+ 
+const enemies = new Pool(()=>new Enemy(),500); 
+let spawnTimer = 0;
+let lastSpawnMinute = -1;
+let enemyLimit = 50;
+let minEnemyLimit = 6;
+
+const spawnTimeline = [
+    ['goblin'], // 0-1 min
+    ['goblin', 'bat'], // 1-2 min
+    ['goblin', 'bat', 'skeleton'], // 2-3 min
+    ['skeleton', 'sprinter'], // 3-4 min
+    ['skeleton', 'orc'], // 4-5 min
+    ['orc', 'sprinter', 'tank'], // 5-6 min
+    ['golem', 'sprinter'], // 6-7 min
+    ['golem', 'tank'],       // 7-8 min
+    ['sprinter', 'tank', 'orc', 'skeleton'], // 8-9 min
+    ['golem', 'ogre_boss'] // 9-10 min
+];
+ 
+// ------------------- XP crystals (magnet rework applied) ------------------- 
+class XPCrystal { 
+  constructor() { 
+    this.active = false; 
+    this.x = 0; this.y = 0; this.vx = 0; this.vy = 0; this.xpAmount = 1; this.pull = false; this.speed = 0; this.gain = 0; this.maxSpeed = 0; this.tier = 1;
+  } 
+  spawn(x, y, xp) { 
+    this.x = x; this.y = y; this.vx = 0; this.vy = 0; this.xpAmount = xp; this.pull = false; this.speed = 0; this.gain = 0; this.maxSpeed = 0; this.active = true;
+    if (xp >= 100) this.tier = 4;
+    else if (xp >= 10) this.tier = 3;
+    else if (xp >= 5) this.tier = 2;
+    else this.tier = 1;
+  } 
+  update(dt) { 
+    if (!this.active) return; 
+    const dx = player.x - this.x; const dy = player.y - this.y; const dist = Math.hypot(dx, dy); 
+    // Magnet detection radius (REWORKED) 
+    const magnetRange = 10 + player.stats["Magnet"]; 
+    if (!this.pull && dist < magnetRange) { 
+      this.pull = true; 
+    } 
+    if (this.pull) { 
+      if (this.speed === 0) {
+        this.speed = 60; this.gain = 500; this.maxSpeed = 1200;
+      }
+      this.speed = Math.min(this.speed + this.gain * dt, this.maxSpeed); 
+      const dirX = dx/(dist||1); const dirY = dy/(dist||1); 
+      this.x += dirX * this.speed * dt; this.y += dirY * this.speed * dt; 
+    } 
+    if (dist < player.r + 12) { 
+      awardXP(this.xpAmount); 
+      xpCrystals.recycle(this); 
+    } 
+  } 
+  render() { 
+    if (!this.active) return;
+    const size = 6 + this.tier;
+    ctx.save();
+    switch (this.tier) {
+        case 2: // Glow
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#0ff';
+            ctx.fillStyle = "#0ff";
+            break;
+        case 3: // Flash
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#fff';
+            ctx.fillStyle = Math.random() < 0.5 ? "#0ff" : "#fff";
+            break;
+        case 4: // Rainbow
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = `hsl(${gameTime * 100 % 360}, 100%, 50%)`;
+            ctx.fillStyle = `hsl(${gameTime * 100 % 360}, 100%, 50%)`;
+            break;
+        default:
+            ctx.fillStyle = "#0ff";
+            break;
+    }
+    ctx.beginPath(); ctx.arc(this.x, this.y, size, 0, Math.PI * 2); ctx.fill(); 
+    ctx.restore();
+  } 
+} 
+const xpCrystals=new Pool(()=>new XPCrystal(),500); 
+function dropXP(x,y,baseXP){ const intPart=Math.floor(baseXP); const frac=baseXP-intPart; let finalXP=intPart; if(Math.random()<frac) finalXP++; if(finalXP>0){ const c=xpCrystals.spawn(); c.spawn(x,y,finalXP); } } 
+function awardXP(amount){ player.addXP(amount); }
+
+// ------------------- Pickups -------------------
+class Pickup {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.type = 'coin'; // e.g., 'coin', 'magnet', 'chest', 'floor_chicken'
+        this.magnetized = false;
+        this.speed = 0;
+    }
+
+    spawn(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.active = true;
+        this.magnetized = false;
+        this.speed = 0;
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < player.stats.Magnet) {
+            this.magnetized = true;
+        }
+
+        if (this.magnetized) {
+            this.speed = Math.min(this.speed + 800 * dt, 1200);
+            this.x += (dx / dist) * this.speed * dt;
+            this.y += (dy / dist) * this.speed * dt;
+        }
+
+        if (dist < 20) {
+            this.collect();
+            this.active = false;
+            pickups.recycle(this);
+        }
+    }
+
+    collect() {
+        audioManager.play('pickup');
+        if (this.type === 'coin') {
+            const greed = 1 + (player.stats.Greed / 100);
+            player.coins += Math.floor(1 * greed);
+        } else if (this.type === 'chest') {
+            chestController.openChest();
+        } else if (this.type === 'magnet') {
+            for (const c of xpCrystals.active) {
+                c.pull = true;
+            }
+        } else if (this.type === 'floor_chicken') {
+            player.hp = Math.min(player.maxhp, player.hp + 30);
+        } else if (this.type === 'flame_breath') {
+            player.flameBreath.active = true;
+            player.flameBreath.timer = 8 * (1 + (player.stats.Duration || 0) / 100);
+            player.flameBreath.damage = 10 * (1 + (player.stats.Might || 0) / 100);
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        let icon = '?';
+        switch (this.type) {
+            case 'coin': icon = '💰'; break;
+            case 'chest': icon = '📦'; break;
+            case 'magnet': icon = '🧲'; break;
+            case 'floor_chicken': icon = '🍗'; break;
+            case 'flame_breath': icon = '🔥'; break;
+        }
+        ctx.font = '24px serif';
+        ctx.fillText(icon, -12, 12);
+        ctx.restore();
+    }
+}
+const pickups = new Pool(() => new Pickup(), 100);
+
+// ------------------- Flame Particles -------------------
+class FlameParticle {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.vx = 0;
+        this.vy = 0;
+        this.life = 0;
+        this.maxLife = 0;
+        this.damage = 0;
+        this.hitEnemies = new Set();
+    }
+
+    spawn(x, y, vx, vy, life, damage) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.life = life;
+        this.maxLife = life;
+        this.damage = damage;
+        this.active = true;
+        this.hitEnemies.clear();
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        this.life -= dt;
+        if (this.life <= 0) {
+            this.active = false;
+            flameParticles.recycle(this);
+            return;
+        }
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        for (const e of enemies.active) {
+            if (!this.hitEnemies.has(e) && Math.hypot(e.x - this.x, e.y - this.y) < e.r + 10) {
+                const finalDmg = Math.max(1, this.damage - e.armor);
+                e.hp -= finalDmg;
+                this.hitEnemies.add(e);
+            }
+        }
+
+        for (const b of breakables.active) {
+            if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + 10) {
+                b.destroy();
+            }
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        const progress = this.life / this.maxLife;
+        ctx.save();
+        ctx.globalAlpha = progress;
+        ctx.fillStyle = `rgba(255, ${Math.random() * 150}, 0, ${progress * 0.8})`;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, progress * 15 + Math.random() * 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+const flameParticles = new Pool(() => new FlameParticle(), 200);
+
+// ------------------- Damaging Zones -------------------
+class DamagingZone {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.radius = 0;
+        this.damage = 0;
+        this.duration = 0;
+        this.hitEnemies = new Map();
+        this.hitboxDelay = 0.5;
+    }
+
+    spawn(x, y, radius, damage, duration) {
+        this.x = x;
+        this.y = y;
+        this.radius = radius;
+        this.damage = damage;
+        this.duration = duration;
+        this.active = true;
+        this.hitEnemies.clear();
+    }
+
+    update(dt) {
+        if (!this.active) return;
+        this.duration -= dt;
+        if (this.duration <= 0) {
+            this.active = false;
+            damagingZones.recycle(this);
+            return;
+        }
+
+        for (const e of enemies.active) {
+            if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
+                if (!this.hitEnemies.has(e) || gameTime - this.hitEnemies.get(e) > this.hitboxDelay) {
+                    const finalDmg = Math.max(1, this.damage - e.armor);
+                    e.hp -= finalDmg;
+                    const h = hitmarks.spawn();
+                    h.spawn(e.x, e.y, finalDmg, "#6464ff");
+                    this.hitEnemies.set(e, gameTime);
+                }
+            }
+        }
+
+        for (const b of breakables.active) {
+            if (Math.hypot(b.x - this.x, b.y - this.y) < this.radius + b.r) {
+                b.destroy();
+            }
+        }
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = 'rgba(100, 100, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+const damagingZones = new Pool(() => new DamagingZone(), 50);
+
+// ------------------- Breakable Objects -------------------
+class Breakable {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.hp = 1;
+        this.r = 15;
+    }
+
+    spawn(x, y) {
+        this.x = x;
+        this.y = y;
+        this.hp = 1;
+        this.active = true;
+    }
+
+    destroy() {
+        const rand = Math.random();
+        if (rand < 0.2) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'coin');
+        } else if (rand < 0.25) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'floor_chicken');
+        } else if (rand < 0.27) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'magnet');
+        } else if (rand < 0.3) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'flame_breath');
+        }
+        this.active = false;
+        breakables.recycle(this);
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(-this.r, -this.r, this.r * 2, this.r * 2);
+        ctx.strokeStyle = '#5A2D0C';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-this.r, -this.r, this.r * 2, this.r * 2);
+        ctx.restore();
+    }
+}
+const breakables = new Pool(() => new Breakable(), 50);
+ 
+// ------------------- Passive items & map ------------------- 
+const passiveItems = [ 
+  { id:"iron_plate", name:"Iron Plate", icon:"🛡️", stat:"Armor", value:1, maxLevel:5, descLvl: (v)=>`Armor +${v}` }, 
+  { id:"power_crystal", name:"Power Crystal", icon:"💥", stat:"Might", value:10, maxLevel:5, descLvl: (v)=>`Might +${v}%` }, 
+  { id:"greaves", name:"Greaves", icon:"🥾", stat:"Move Speed", value:10, maxLevel:5, descLvl: (v)=>`Move Speed +${v}%` }, 
+  { id:"arcane_sphere", name:"Arcane Sphere", icon:"🔮", stat:"Cooldown", value:8, maxLevel:5, descLvl: (v)=>`Cooldown -${v}%` }, 
+  { id:"heart_pendant", name:"Heart Pendant", icon:"❤️", stat:"Max Health", value:20, maxLevel:5, descLvl: (v)=>`Max Health +${v}` }, 
+  { id:"four_leaf", name:"Four Leaf Charm", icon:"🍀", stat:"Luck", value:10, maxLevel:5, descLvl: (v)=>`Luck +${v}%` }, 
+  { id:"magnet_core", name:"Magnet Core", icon:"🧲", stat:"Magnet", value:30, maxLevel:5, descLvl: (v)=>`Magnet +${v}` }, 
+  { id:"mirror_sigil", name:"Mirror Sigil", icon:"🌀", stat:"Amount", value:1, maxLevel:3, descLvl: (v)=>`Amount +${v}` },
+    { id:"scholar_stone", name:"Scholar Stone", icon:"🎓", stat:"Growth", value:8, maxLevel:5, descLvl: (v)=>`Growth +${v}%` },
+    { id:"phoenix_tear", name:"Phoenix Tear", icon:"🕊️", stat:"Revival", value:1, maxLevel:2, descLvl: (v)=>`Revival +${v}` },
+    { id:"gold_ring", name:"Gold Ring", icon:"💍", stat:"Greed", value:15, maxLevel:5, descLvl: (v)=>`Greed +${v}%` },
+    { id:"cursed_skull", name:"Cursed Skull", icon:"💀", stat:"Curse", value:10, maxLevel:5, descLvl: (v)=>`Curse +${v}%` },
+    { id:"ancient_tome", name:"Ancient Tome", icon:"📖", stat:"Duration", value:10, maxLevel:5, descLvl: (v)=>`Duration +${v}%` },
+    { id:"swift_boots", name:"Swift Boots", icon:"👢", stat:"Speed", value:10, maxLevel:5, descLvl: (v)=>`Speed +${v}%` },
+    { id:"focus_lens", name:"Focus Lens", icon:"🔎", stat:"Area", value:10, maxLevel:5, descLvl: (v)=>`Area +${v}%` },
+    { id:"healing_balm", name:"Healing Balm", icon:"🌿", stat:"Recovery", value:1, maxLevel:5, descLvl: (v)=>`Recovery +${v}` }
+]; 
+const passiveMap = {}; for(const p of passiveItems) passiveMap[p.id]=p; 
+ 
+// ------------------- UI helpers (updatePassiveSlotsUI & updateInventoryUI) ------------------- 
+function updatePassiveSlotsUI(){ 
+  const container = document.getElementById("passiveSlots"); 
+  if(!container) return; 
+  container.innerHTML=""; 
+  for(let i=0;i<player.passiveSlots.length;i++){ 
+    const id = player.passiveSlots[i]; 
+    const div = document.createElement("div"); 
+    div.style.width="40px"; div.style.height="40px"; div.style.display="flex"; div.style.alignItems="center"; div.style.justifyContent="center"; div.style.fontSize="18px"; 
+    if(id){ 
+      const item = passiveMap[id]; 
+      const lvl = player.passiveLevels[id]||0; 
+      div.textContent = item.icon; 
+      div.title = `${item.name} L${lvl}/${item.maxLevel}\n${item.descLvl(item.value)}`; 
+    } else { 
+      div.textContent = "-"; 
+    } 
+    container.appendChild(div); 
+  } 
+} 
+ 
+function updateInventoryUI(){ 
+  const wb = document.getElementById("weaponBar"); 
+  const pb = document.getElementById("passiveBar"); 
+  if(wb) wb.innerHTML = ""; 
+  if(pb) pb.innerHTML = ""; 
+ 
+  // Weapons 
+  for(let i=0;i<player.weaponSlots.length;i++){ 
+    const w = player.weaponSlots[i]; 
+    const d = document.createElement("div"); 
+    d.className = w ? "slot filled" : "slot"; 
+    if(w){
+      if (w.isEvolved) {
+        d.classList.add("evolved");
+      }
+      const icon = (typeof w.icon === 'string' && w.icon.length<=2) ? w.icon : (w.icon || w.name || "W"); 
+      const lvl = (w.level !== undefined) ? w.level : 1; 
+      d.innerHTML = `${icon}<div class="lvl-badge">${lvl}</div>`; 
+      d.title = `${w.name} L${lvl}\n${w.desc || ''}\nBase CD: ${w.baseCooldown.toFixed(2)}s\nBase DMG: ${w.baseDamage}`; 
+    } 
+    if(wb) wb.appendChild(d); 
+  } 
+ 
+  // Passives 
+  for(let i=0;i<player.passiveSlots.length;i++){ 
+    const id = player.passiveSlots[i]; 
+    const d = document.createElement("div"); 
+    d.className = id ? "slot filled" : "slot"; 
+    if(id){ 
+      const item = passiveMap[id]; 
+      const lvl = player.passiveLevels[id] || 1; 
+      d.innerHTML = `${item.icon}<div class="lvl-badge">${lvl}</div>`; 
+      d.title = `${item.name} L${lvl}/${item.maxLevel}\n${item.descLvl(item.value)}`; 
+    } 
+    if(pb) pb.appendChild(d); 
+  } 
+} 
+ 
+// initialize UI 
+updateInventoryUI(); 
+updatePassiveSlotsUI(); 
+ 
+// ------------------- Death / revive ------------------- 
+function triggerDeath(){ 
+  dead=true; paused=true; 
+  document.getElementById("deathScreen").style.display="flex"; 
+  document.getElementById("timeSurvived").innerText = `${Math.floor(gameTime/60)}:${(Math.floor(gameTime)%60).toString().padStart(2,'0')}`; 
+  const revBtn = document.getElementById("reviveBtn"); const restartBtn = document.getElementById("restartBtn"); 
+  if(player.stats.Revival >= 1){ 
+    revBtn.style.display = "block"; revBtn.innerText = `Revive (${player.stats.Revival} left)`; 
+    revBtn.onclick = () => { 
+      player.stats.Revival--; 
+      player.hp = player.maxhp; 
+      dead=false; paused=false; 
+      document.getElementById("deathScreen").style.display="none"; 
+      // kill all enemies 
+      enemies.active.slice().forEach(e => e.hp = 0); 
+    }; 
+  } else { 
+    revBtn.style.display = "none"; 
+    document.getElementById("noReviveMsg").style.display = "block"; 
+  } 
+  restartBtn.onclick = () => location.reload(); 
+} 
+ 
+// ------------------- HUD / Rendering ------------------- 
+const camera = { x:0, y:0, shake:0 }; 
+ 
+function renderHUD(){ 
+  const statEl = document.getElementById("stats"); 
+  if(statEl) statEl.innerText = `Kills: 0  |  Time: ${Math.floor(gameTime/60)}:${(Math.floor(gameTime)%60).toString().padStart(2,'0')} | Coins: ${player.coins}`; 
+ 
+  // HP Bar 
+  const w = 250, h = 16, pad = 20; 
+  const x = canvas.width - w - pad; 
+  const y = pad; 
+  ctx.fillStyle = "#333"; ctx.fillRect(x-2, y-2, w+4, h+4); 
+  const hpPct = Math.max(0, player.hp / player.maxhp); 
+  ctx.fillStyle = "#c33"; ctx.fillRect(x, y, w*hpPct, h); 
+  ctx.fillStyle = "#fff"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.fillText(`${Math.ceil(player.hp)}/${Math.ceil(player.maxhp)}`, x + w/2, y + 12); 
+ 
+  // XP Bar 
+  const xpH = 6; 
+  ctx.fillStyle = "#222"; ctx.fillRect(0, 0, canvas.width, xpH); 
+  ctx.fillStyle = "#0af"; ctx.fillRect(0, 0, canvas.width * (player.xp / player.xpToNext), xpH); 
+  ctx.fillStyle = "#0af"; ctx.font = "bold 14px monospace"; ctx.textAlign = "center"; ctx.fillText(`LV ${player.level}`, canvas.width/2, xpH + 16); 
+ 
+ 
+} 
+ 
+// ------------------- Main update & render ------------------- 
+function update(dt){ 
+  if(paused) return; 
+  player.update(dt); 
+ 
+  // Timeline-based spawning
+  const minute = Math.floor(gameTime / 60);
+  if (minute !== lastSpawnMinute) {
+    lastSpawnMinute = minute;
+    enemyLimit += 10; // Increase enemy limit every minute
+    minEnemyLimit += 2; // Increase min enemy limit every minute
+    if (minute > 0 && minute % 2 === 0) {
+      const e = enemies.spawn();
+      e.type = 'ogre_boss';
+      e.spawn(player.x, player.y);
+    }
+  }
+
+  const spawnTypes = spawnTimeline[Math.min(minute, spawnTimeline.length - 1)];
+  spawnTimer -= dt;
+
+  // If below min enemy count, spawn much faster
+  if (enemies.active.length < minEnemyLimit) {
+      spawnTimer = -0.1; // Force spawn next frame
+  }
+
+  if (spawnTimer <= 0 && enemies.active.length < enemyLimit) {
+    const curse = 1 + (player.stats.Curse / 100);
+    spawnTimer = Math.max(0.05, 0.4 / curse - minute * 0.015); // Spawn faster over time
+    const e = enemies.spawn();
+    e.type = spawnTypes[Math.floor(Math.random() * spawnTypes.length)];
+    e.spawn(player.x, player.y);
+  }
+
+  enemies.active.slice().forEach(e => e.update(dt));
+  projectiles.active.slice().forEach(p => p.update(dt));
+  crossProjectiles.active.slice().forEach(p => p.update(dt));
+  fireballs.active.slice().forEach(f => f.update(dt));
+  staticEffects.active.slice().forEach(s => s.update(dt));
+  demonicSigils.active.slice().forEach(s => s.update(dt));
+  xpCrystals.active.slice().forEach(c => c.update(dt));
+  pickups.active.slice().forEach(p => p.update(dt));
+  flameParticles.active.slice().forEach(p => p.update(dt));
+  damagingZones.active.slice().forEach(z => z.update(dt));
+  hitmarks.active.slice().forEach(h => h.update(dt));
+
+  const offScreenCrystals = xpCrystals.active.filter(c => 
+    c.x < camera.x || c.x > camera.x + canvas.width ||
+    c.y < camera.y || c.y > camera.y + canvas.height
+  );
+
+  if (offScreenCrystals.length > 100) {
+    const totalXP = offScreenCrystals.reduce((sum, c) => sum + c.xpAmount, 0);
+    offScreenCrystals.forEach(c => xpCrystals.recycle(c));
+    
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.max(canvas.width, canvas.height) / 2 + 50;
+    const x = player.x + Math.cos(angle) * dist;
+    const y = player.y + Math.sin(angle) * dist;
+    
+    const newCrystal = xpCrystals.spawn();
+    newCrystal.spawn(x, y, totalXP);
+  }
+
+  if (breakables.active.length < 10 && Math.random() < 0.01) {
+    const b = breakables.spawn();
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 300 + 200;
+    b.spawn(player.x + Math.cos(angle) * dist, player.y + Math.sin(angle) * dist);
+  }
+
+  for (let i = thunderbolts.length - 1; i >= 0; i--) {
+    const bolt = thunderbolts[i];
+    bolt.timer -= dt;
+    if (bolt.timer <= 0) {
+      for (const e of enemies.active) {
+        if (Math.hypot(e.x - bolt.x, e.y - bolt.y) < 30) { 
+          const finalDmg = Math.max(1, bolt.damage - e.armor);
+          e.hp -= finalDmg;
+          const h = hitmarks.spawn();
+          h.spawn(e.x, e.y, finalDmg, "#ff0");
+        }
+      }
+      for (const b of breakables.active) {
+        if (Math.hypot(b.x - bolt.x, b.y - bolt.y) < 30) {
+          b.destroy();
+        }
+      }
+      thunderbolts.splice(i, 1);
+    }
+  }
+
+  for (let i = novaPulses.length - 1; i >= 0; i--) {
+    const pulse = novaPulses[i];
+    pulse.life -= dt;
+    pulse.radius = (1 - (pulse.life / 0.5)) * pulse.maxRadius;
+
+    if (pulse.life <= 0) {
+      novaPulses.splice(i, 1);
+      continue;
+    }
+
+    for (const e of enemies.active) {
+      if (!pulse.hitEnemies.has(e)) {
+        if (Math.hypot(e.x - pulse.x, e.y - pulse.y) < pulse.radius) {
+          const finalDmg = Math.max(1, pulse.damage - e.armor);
+          e.hp -= finalDmg;
+          const h = hitmarks.spawn();
+          h.spawn(e.x, e.y, finalDmg, "#f66");
+          pulse.hitEnemies.add(e);
+        }
+      }
+    }
+
+    for (const b of breakables.active) {
+        if (Math.hypot(b.x - pulse.x, b.y - pulse.y) < pulse.radius + b.r) {
+            b.destroy();
+        }
+    }
+  }
+
+  camera.x = player.x - canvas.width/2;
+  camera.y = player.y - canvas.height/2; 
+  if(camera.shake>0){ camera.x += (Math.random()-0.5)*camera.shake; camera.y += (Math.random()-0.5)*camera.shake; camera.shake -= dt*20; if(camera.shake<0) camera.shake=0; } 
+} 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+function render(){ 
+  ctx.setTransform(1,0,0,1,0,0); 
+  ctx.clearRect(0,0,canvas.width,canvas.height); 
+ 
+  ctx.save(); 
+  ctx.translate(-camera.x, -camera.y); 
+  ctx.fillStyle = bgPattern; 
+  const patOffX = camera.x % 128; 
+  const patOffY = camera.y % 128; 
+  ctx.translate(camera.x - patOffX, camera.y - patOffY); 
+  ctx.fillRect(patOffX - 128, patOffY - 128, canvas.width + 256, canvas.height + 256); 
+  ctx.restore(); 
+ 
+  ctx.save(); 
+  ctx.translate(-camera.x, -camera.y); 
+  xpCrystals.active.forEach(c => c.render()); 
+  pickups.active.forEach(p => p.render());
+  breakables.active.forEach(b => b.render());
+  enemies.active.forEach(e => e.render()); 
+  projectiles.active.forEach(p => p.render()); 
+  crossProjectiles.active.forEach(p => p.render());
+  fireballs.active.forEach(f => f.render());
+  staticEffects.active.forEach(s => s.render());
+  demonicSigils.active.forEach(s => s.render());
+  flameParticles.active.forEach(p => p.render());
+  damagingZones.active.forEach(z => z.render());
+  renderThunderbolts();
+  renderNovaPulses();
+  hitmarks.active.forEach(h => h.render()); 
+  if(player.hp > 0) player.render(); 
+  ctx.restore(); 
+ 
+  renderHUD(); 
+} 
+ 
+ 
+ 
+// ------------------- Loop ------------------- 
+let lastTime = 0; 
+function loop(ts){ 
+  const dt = Math.min((ts - lastTime) / 1000, 0.1); 
+  lastTime = ts; 
+  if(!paused && !dead) gameTime += dt; 
+  update(dt); 
+  render(); 
+  requestAnimationFrame(loop); 
+} 
+requestAnimationFrame(loop); 
+ 
+// ------------------- Utilities & init ------------------- 
+function placePlayerAtCenter(){ player.x = 0; player.y = 0; } 
+placePlayerAtCenter(); 
+ 
+// Provide a simple starter weapon in slot 0 (Wand clone) 
+player.weaponSlots[0] = cloneWeaponTemplate(weaponsCatalog.wand); 
+player.weaponSlots[0].applyLevelEffects(player.weaponSlots[0].level); // ensure L1 effects applied 
+ 
+// Keep inventory UI updated when passives change externally 
+updateInventoryUI(); 
+updatePassiveSlotsUI(); 
+ 
+</script> 
+</body> 
+</html> 
+ 
+ 

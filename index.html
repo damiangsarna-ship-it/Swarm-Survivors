@@ -396,9 +396,18 @@ class Player{
     let vx=(input.right-input.left), vy=(input.down-input.up); 
     const len=Math.hypot(vx,vy)||1; 
     vx/=len; vy/=len; 
-    let speed=this.stats["Move Speed"]*(1-this.hitSlow); 
-    this.x+=vx*speed*dt; 
-    this.y+=vy*speed*dt; 
+    let speed=this.stats["Move Speed"]*(1-this.hitSlow);
+
+    const nextX = this.x + vx * speed * dt;
+    const nextY = this.y + vy * speed * dt;
+
+    if (!isCollidingWithObstacle(nextX, this.y, this.r)) {
+        this.x = nextX;
+    }
+    if (!isCollidingWithObstacle(this.x, nextY, this.r)) {
+        this.y = nextY;
+    }
+
     if(this.hitSlow>0) this.hitSlow-=dt;
 
     if (this.flameBreath.active) {
@@ -471,6 +480,44 @@ const player = new Player();
  
 // ------------------- Utilities ------------------- 
 function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); } 
+
+function isCollidingWithObstacle(x, y, radius = 0) {
+    for (const obstacle of obstacles.active) {
+        if (x + radius > obstacle.x && x - radius < obstacle.x + obstacle.width &&
+            y + radius > obstacle.y && y - radius < obstacle.y + obstacle.height) {
+            return obstacle;
+        }
+    }
+    return null;
+}
+
+function pushOutOfObstacles(entity) {
+    const obstacle = isCollidingWithObstacle(entity.x, entity.y);
+    if (obstacle) {
+        const closestX = clamp(entity.x, obstacle.x, obstacle.x + obstacle.width);
+        const closestY = clamp(entity.y, obstacle.y, obstacle.y + obstacle.height);
+        const dx = entity.x - closestX;
+        const dy = entity.y - closestY;
+
+        if (dx === 0 && dy === 0) { // Inside the obstacle, push to nearest edge
+            const distToLeft = entity.x - obstacle.x;
+            const distToRight = (obstacle.x + obstacle.width) - entity.x;
+            const distToTop = entity.y - obstacle.y;
+            const distToBottom = (obstacle.y + obstacle.height) - entity.y;
+
+            const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
+            if (minDist === distToLeft) entity.x = obstacle.x - 1;
+            else if (minDist === distToRight) entity.x = obstacle.x + obstacle.width + 1;
+            else if (minDist === distToTop) entity.y = obstacle.y - 1;
+            else entity.y = obstacle.y + obstacle.height + 1;
+        } else { // On the edge, push out
+            const dist = Math.hypot(dx, dy);
+            entity.x += (dx / dist);
+            entity.y += (dy / dist);
+        }
+    }
+    return entity;
+}
 
 class AudioManager {
     constructor() {
@@ -2852,6 +2899,7 @@ const EnemyTypes={
     ogre_boss:   {hp:120,  dmg:15, armor:10, speed:50, size:32, xpValue:100, isBoss: true, color: '#dc143c'},
     lich:        {hp:600,  dmg:18, armor:5,  speed:50, size:20, xpValue:500, isBoss: true, color: '#9370db'},
     doomknight:  {hp:2000, dmg:25, armor:15, speed:45, size:40, xpValue:1500, isBoss: true, color: '#4b0082'},
+    guardian:    {hp:150, dmg:20, armor:12, speed:65, size:25, xpValue:1000, isBoss: true, color: '#ffd700'}, // Activation Ring boss
 
     // Swarm Units
     ghoul:       {hp:10, dmg:5, armor:0, speed:90, size:12, xpValue:1.5, color: '#556b2f', isHorde: true},
@@ -3173,7 +3221,7 @@ class XPCrystal {
   } 
 } 
 const xpCrystals=new Pool(()=>new XPCrystal(),500); 
-function dropXP(x,y,baseXP){ const intPart=Math.floor(baseXP); const frac=baseXP-intPart; let finalXP=intPart; if(Math.random()<frac) finalXP++; if(finalXP>0){ const c=xpCrystals.spawn(); c.spawn(x,y,finalXP); } } 
+function dropXP(x,y,baseXP){ const intPart=Math.floor(baseXP); const frac=baseXP-intPart; let finalXP=intPart; if(Math.random()<frac) finalXP++; if(finalXP>0){ const c=xpCrystals.spawn(); c.spawn(x,y,finalXP); pushOutOfObstacles(c); } }
 function awardXP(amount){ player.addXP(amount); }
 
 // ------------------- Pickups -------------------
@@ -3194,6 +3242,7 @@ class Pickup {
         this.active = true;
         this.magnetized = false;
         this.speed = 0;
+        pushOutOfObstacles(this);
     }
 
     update(dt) {
@@ -3506,18 +3555,143 @@ class Breakable {
 
     render() {
         if (!this.active) return;
+        const size = this.r * 2;
         ctx.save();
         ctx.translate(this.x, this.y);
+
+        // Main box color
         ctx.fillStyle = '#8B4513';
-        ctx.fillRect(-this.r, -this.r, this.r * 2, this.r * 2);
+        ctx.fillRect(-this.r, -this.r, size, size);
+
+        // Outline
         ctx.strokeStyle = '#5A2D0C';
         ctx.lineWidth = 2;
-        ctx.strokeRect(-this.r, -this.r, this.r * 2, this.r * 2);
+        ctx.strokeRect(-this.r, -this.r, size, size);
+
+        // Planks
+        ctx.beginPath();
+        ctx.moveTo(-this.r, -this.r / 3);
+        ctx.lineTo(this.r, -this.r / 3);
+        ctx.moveTo(-this.r, this.r / 3);
+        ctx.lineTo(this.r, this.r / 3);
+        ctx.stroke();
+
+        // X pattern
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(-this.r, -this.r);
+        ctx.lineTo(this.r, this.r);
+        ctx.moveTo(this.r, -this.r);
+        ctx.lineTo(-this.r, this.r);
+        ctx.stroke();
+
+
         ctx.restore();
     }
 }
 const breakables = new Pool(() => new Breakable(), 50);
- 
+
+// ------------------- Obstacles -------------------
+class Obstacle {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.width = 100;
+        this.height = 100;
+    }
+
+    spawn(x, y, width, height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.active = true;
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.fillStyle = 'rgba(0, 50, 100, 0.7)';
+        ctx.strokeStyle = '#00f';
+        ctx.lineWidth = 2;
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.strokeRect(this.x, this.y, this.width, this.height);
+    }
+}
+const obstacles = new Pool(() => new Obstacle(), 50);
+
+// ------------------- Activation Ring -------------------
+class ActivationRing {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.radius = 60;
+        this.activated = false;
+        this.alpha = 1;
+    }
+
+    spawn(x, y) {
+        this.x = x;
+        this.y = y;
+        this.active = true;
+        this.activated = false;
+        this.alpha = 1;
+    }
+
+    update(dt) {
+        if (!this.active) return;
+
+        if (!this.activated && Math.hypot(player.x - this.x, player.y - this.y) < this.radius) {
+            this.activated = true;
+            this.trigger();
+        }
+
+        if (this.activated) {
+            this.alpha -= dt * 2;
+            if (this.alpha <= 0) {
+                this.active = false;
+                activationRings.recycle(this);
+            }
+        }
+    }
+
+    trigger() {
+        const e = enemies.spawn();
+        e.init('guardian');
+        e.x = this.x;
+        e.y = this.y;
+        e.hp = 150 + 15 * player.level; // Custom HP scaling
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.strokeStyle = this.activated ? 'gold' : '#0ff';
+        ctx.lineWidth = 5;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = this.activated ? 'gold' : '#0ff';
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (this.activated) {
+            for (let i = 0; i < 5; i++) {
+                const progress = (1 - this.alpha);
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * progress * (1 + i/5), 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        ctx.restore();
+    }
+}
+const activationRings = new Pool(() => new ActivationRing(), 10);
+
+
 // ------------------- Passive items & map ------------------- 
 const passiveItems = [ 
   { id:"iron_plate", name:"Iron Plate", icon:"🛡️", stat:"Armor", value:1, maxLevel:5, descLvl: (v)=>`Armor +${v}` }, 
@@ -3751,6 +3925,7 @@ function update(dt){
   pickups.active.slice().forEach(p => p.update(dt));
   flameParticles.active.slice().forEach(p => p.update(dt));
   damagingZones.active.slice().forEach(z => z.update(dt));
+  activationRings.active.slice().forEach(r => r.update(dt));
   hitmarks.active.slice().forEach(h => h.update(dt));
 
   const offScreenCrystals = xpCrystals.active.filter(c => 
@@ -3771,12 +3946,43 @@ function update(dt){
     newCrystal.spawn(x, y, totalXP);
   }
 
-  if (breakables.active.length < 10 && Math.random() < 0.01) {
-    const b = breakables.spawn();
-    const angle = Math.random() * Math.PI * 2;
-    const dist = Math.random() * 300 + 200;
-    b.spawn(player.x + Math.cos(angle) * dist, player.y + Math.sin(angle) * dist);
-  }
+  // Reworked Breakable Box Spawning
+    if (breakables.active.length < 25 && Math.random() < 0.02) {
+        const patternType = Math.random() < 0.7 ? 'line' : 'cluster';
+        const count = patternType === 'line' ? 5 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 5);
+
+        const angle = Math.random() * Math.PI * 2;
+        const spawnDist = Math.max(canvas.width, canvas.height) / 2 + 100;
+        const startX = player.x + Math.cos(angle) * spawnDist;
+        const startY = player.y + Math.sin(angle) * spawnDist;
+
+        const lineAngle = Math.random() * Math.PI * 2;
+        const spacing = 40;
+
+        for (let i = 0; i < count; i++) {
+            let x, y;
+            if (patternType === 'line') {
+                x = startX + Math.cos(lineAngle) * i * spacing;
+                y = startY + Math.sin(lineAngle) * i * spacing;
+            } else { // cluster
+                x = startX + (Math.random() - 0.5) * 100;
+                y = startY + (Math.random() - 0.5) * 100;
+            }
+
+            if (!isCollidingWithObstacle(x, y, 15)) {
+                const b = breakables.spawn();
+                b.spawn(x, y);
+            }
+        }
+    }
+
+    // Despawn distant boxes
+    for (const b of breakables.active) {
+        if (Math.hypot(b.x - player.x, b.y - player.y) > 2000) {
+            breakables.recycle(b);
+        }
+    }
+
 
   for (let i = thunderbolts.length - 1; i >= 0; i--) {
     const bolt = thunderbolts[i];
@@ -3871,10 +4077,12 @@ function render(){
   demonicRealms.active.forEach(s => s.render());
   flameParticles.active.forEach(p => p.render());
   damagingZones.active.forEach(z => z.render());
+  activationRings.active.forEach(r => r.render());
   renderThunderbolts();
   renderNovaPulses();
   hitmarks.active.forEach(h => h.render()); 
-  if(player.hp > 0) player.render(); 
+  if(player.hp > 0) player.render();
+  obstacles.active.forEach(o => o.render());
   ctx.restore(); 
  
   renderHUD(); 
@@ -3905,6 +4113,13 @@ player.weaponSlots[0].applyLevelEffects(player.weaponSlots[0].level); // ensure 
 // Keep inventory UI updated when passives change externally 
 updateInventoryUI(); 
 updatePassiveSlotsUI(); 
+
+// Spawn some initial obstacles for testing
+obstacles.spawn().spawn(200, 200, 150, 100);
+obstacles.spawn().spawn(-300, -100, 100, 250);
+obstacles.spawn().spawn(50, -400, 300, 80);
+activationRings.spawn().spawn(400, 0);
+
 
 // --- CONSOLE IMPLEMENTATION ---
 class ConsoleManager {

@@ -161,8 +161,32 @@ button:active { transform:scale(0.95); }
 .log-error { color: #ff6b6b; }
 .log-success { color: #6bff94; }
 .log-info { color: #6b94ff; }
-.autocomplete-suggestion {
-    color: #888;
+#autocompleteList {
+    position: absolute;
+    bottom: 100%; /* Position above the input bar */
+    left: 0;
+    right: 0;
+    background: #282828;
+    border-top: 1px solid #444;
+    border-left: 1px solid #444;
+    border-right: 1px solid #444;
+    max-height: 140px;
+    overflow-y: auto;
+    z-index: 210; /* Above console */
+    display: none; /* Initially hidden */
+}
+.autocomplete-item {
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: pre;
+}
+.autocomplete-item:hover {
+    background: #3f3f3f;
+}
+.autocomplete-item.selected {
+    background: #007acc;
+    color: white;
 }
  
 </style> 
@@ -175,8 +199,8 @@ button:active { transform:scale(0.95); }
     <div id="console">
         <div id="consoleOutput"></div>
         <div style="position: relative;">
+            <div id="autocompleteList"></div>
             <input type="text" id="consoleInput" placeholder="Enter command..." autocomplete="off" />
-            <span id="autocompleteSuggestion" style="position: absolute; left: 10px; top: 10px; color: #555; pointer-events: none;"></span>
         </div>
     </div>
   <div id="stats"></div> 
@@ -1158,8 +1182,8 @@ class DemonicRealmEffect {
                 const dist = Math.hypot(dx, dy);
 
                 if (dist < this.radius + e.r && dist > 0) {
-                    e.x += (dx / dist) * 80 * pullStrength * dt;
-                    e.y += (dy / dist) * 80 * pullStrength * dt;
+                    e.x += (dx / dist) * 250 * pullStrength * dt;
+                    e.y += (dy / dist) * 250 * pullStrength * dt;
 
                     if (gameTime - this.lastDmgTime > 0.2) {
                         const hpBefore = e.hp;
@@ -1899,14 +1923,18 @@ function magneticFieldFire(playerRef, slotIndex) {
     const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
     const duration = w.duration * (1 + (playerRef.stats.Duration || 0) / 100);
     const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const projectileDelay = 150; // ms delay
 
     for (let i = 0; i < amount; i++) {
-        const zone = damagingZones.spawn();
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.random() * 100 + 50;
-        const x = playerRef.x + Math.cos(angle) * dist;
-        const y = playerRef.y + Math.sin(angle) * dist;
-        zone.spawn(x, y, 60 * area, damage, duration, true);
+        setTimeout(() => {
+            if (paused || dead) return;
+            const zone = damagingZones.spawn();
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * 100 + 50;
+            const x = playerRef.x + Math.cos(angle) * dist;
+            const y = playerRef.y + Math.sin(angle) * dist;
+            zone.spawn(x, y, 60 * area, damage, duration, true);
+        }, i * projectileDelay);
     }
 }
 // Function to clone a catalog weapon when giving it to player (to keep catalog intact) 
@@ -2321,8 +2349,28 @@ const chestController = {
         if (Math.random() * luck > 2.5) numRewards = 5;
 
         const upgradeableWeapons = player.weaponSlots.filter(w => w && w.level < w.maxLevel);
-        const upgradeablePassives = player.passiveSlots.filter(p => p && player.passiveLevels[p] < passiveMap[p].maxLevel);
-        const possibleUpgrades = [...upgradeableWeapons, ...upgradeablePassives.map(p => passiveMap[p])];
+
+        const possibleUpgrades = [...upgradeableWeapons];
+        const ownedPassiveIds = new Set();
+
+        // Add owned, upgradeable passives
+        player.passiveSlots.forEach(id => {
+            if (id) {
+                ownedPassiveIds.add(id);
+                if ((player.passiveLevels[id] || 0) < passiveMap[id].maxLevel) {
+                    possibleUpgrades.push(passiveMap[id]);
+                }
+            }
+        });
+
+        // Add new passives if there's a free slot
+        if (ownedPassiveIds.size < player.passiveSlots.length) {
+            passiveItems.forEach(item => {
+                if (!ownedPassiveIds.has(item.id)) {
+                    possibleUpgrades.push(item);
+                }
+            });
+        }
 
         let rewards = [];
         for (let i = 0; i < numRewards; i++) {
@@ -2457,8 +2505,18 @@ const chestController = {
                     icon.textContent = weapon.icon;
                     title.textContent = `${weapon.name} LV ${weapon.level}`;
                 } else { // Passive
-                    player.passiveLevels[reward.id]++;
-                    levelUpController.applyStat(reward.stat, reward.value);
+                    const currentLevel = player.passiveLevels[reward.id] || 0;
+                    if (currentLevel > 0) { // Upgrade existing passive
+                        player.passiveLevels[reward.id]++;
+                        levelUpController.applyStat(reward.stat, reward.value);
+                    } else { // Add new passive
+                        const freeSlot = player.passiveSlots.findIndex(s => !s);
+                        if (freeSlot !== -1) {
+                            player.passiveSlots[freeSlot] = reward.id;
+                            player.passiveLevels[reward.id] = 1;
+                            levelUpController.applyStat(reward.stat, reward.value);
+                        }
+                    }
                     icon.textContent = reward.icon;
                     title.textContent = `${reward.name} LV ${player.passiveLevels[reward.id]}`;
                 }
@@ -3619,26 +3677,37 @@ class ConsoleManager {
     constructor() {
         this.outputEl = document.getElementById('consoleOutput');
         this.inputEl = document.getElementById('consoleInput');
+        this.autocompleteEl = document.getElementById('autocompleteList');
         this.history = [];
         this.historyIndex = -1;
         this.commands = {};
-        this.currentSuggestion = '';
+        this.suggestions = [];
+        this.selectedIndex = -1;
 
         this.inputEl.addEventListener('keydown', this.onKeyDown.bind(this));
         this.inputEl.addEventListener('input', this.onInput.bind(this));
+        this.inputEl.addEventListener('blur', () => this.hideSuggestions());
+        document.addEventListener('click', (e) => {
+            if (!this.inputEl.contains(e.target)) {
+                this.hideSuggestions();
+            }
+        });
     }
 
     onInput() {
         this.updateSuggestions();
     }
 
+    hideSuggestions() {
+        this.autocompleteEl.style.display = 'none';
+        this.suggestions = [];
+        this.selectedIndex = -1;
+    }
+
     updateSuggestions() {
         const text = this.inputEl.value;
-        const suggestionEl = document.getElementById('autocompleteSuggestion');
-
         if (!text) {
-            suggestionEl.textContent = '';
-            this.currentSuggestion = '';
+            this.hideSuggestions();
             return;
         }
 
@@ -3646,65 +3715,100 @@ class ConsoleManager {
         const command = parts[0];
         const arg = parts.length > 1 ? parts[parts.length - 1] : '';
 
-        let suggestions = [];
+        let potentialSuggestions = [];
         if (parts.length === 1) {
-            suggestions = Object.keys(this.commands).filter(c => c.startsWith(command));
+            potentialSuggestions = Object.keys(this.commands).filter(c => c.startsWith(command));
         } else {
             const commandDef = this.commands[command];
             if (commandDef && commandDef.getSuggestions) {
-                suggestions = commandDef.getSuggestions(parts.slice(1));
+                potentialSuggestions = commandDef.getSuggestions(parts.slice(1));
             }
         }
 
-        if (suggestions.length > 0) {
-            const match = suggestions.find(s => s.startsWith(arg));
-            if (match) {
-                this.currentSuggestion = [...parts.slice(0, parts.length - 1), match].join(' ');
-                suggestionEl.textContent = this.currentSuggestion;
-            } else {
-                suggestionEl.textContent = '';
-                this.currentSuggestion = '';
-            }
+        this.suggestions = potentialSuggestions;
+        this.selectedIndex = -1;
+
+        if (this.suggestions.length > 0) {
+            this.renderSuggestions();
+            this.autocompleteEl.style.display = 'block';
         } else {
-            suggestionEl.textContent = '';
-            this.currentSuggestion = '';
+            this.hideSuggestions();
         }
     }
 
+    renderSuggestions() {
+        this.autocompleteEl.innerHTML = '';
+        this.suggestions.forEach((suggestion, index) => {
+            const item = document.createElement('div');
+            item.className = 'autocomplete-item';
+            if (index === this.selectedIndex) {
+                item.classList.add('selected');
+            }
+            item.textContent = suggestion;
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                this.applySuggestion(suggestion);
+                this.inputEl.focus();
+            });
+            this.autocompleteEl.appendChild(item);
+        });
+    }
+
+    applySuggestion(suggestion) {
+        const parts = this.inputEl.value.split(' ');
+        parts[parts.length - 1] = suggestion;
+        this.inputEl.value = parts.join(' ') + ' ';
+        this.hideSuggestions();
+    }
+
     onKeyDown(e) {
-        if (e.key === 'Tab') {
-            e.preventDefault();
-            if (this.currentSuggestion) {
-                this.inputEl.value = this.currentSuggestion;
-                this.onInput();
+        if (this.suggestions.length > 0 && this.autocompleteEl.style.display === 'block') {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.selectedIndex = (this.selectedIndex - 1 + this.suggestions.length) % this.suggestions.length;
+                this.renderSuggestions();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.selectedIndex = (this.selectedIndex + 1) % this.suggestions.length;
+                this.renderSuggestions();
+            } else if (e.key === 'Tab' || e.key === 'Enter') {
+                e.preventDefault();
+                if (this.selectedIndex !== -1) {
+                    this.applySuggestion(this.suggestions[this.selectedIndex]);
+                } else if (this.suggestions.length > 0) {
+                     this.applySuggestion(this.suggestions[0]);
+                }
+            } else if (e.key === 'Escape') {
+                this.hideSuggestions();
             }
-        } else if (e.key === 'Enter') {
-            const text = this.inputEl.value;
-            if (text) {
-                this.executeCommand(text);
-                this.history.unshift(text);
-                if (this.history.length > 50) this.history.pop();
-                this.historyIndex = -1;
-                this.inputEl.value = '';
-                this.onInput();
+        } else {
+            if (e.key === 'Enter') {
+                const text = this.inputEl.value;
+                if (text) {
+                    this.executeCommand(text);
+                    if (this.history[0] !== text) {
+                        this.history.unshift(text);
+                    }
+                    if (this.history.length > 50) this.history.pop();
+                    this.historyIndex = -1;
+                    this.inputEl.value = '';
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (this.history.length > 0 && this.historyIndex < this.history.length - 1) {
+                    this.historyIndex++;
+                    this.inputEl.value = this.history[this.historyIndex];
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (this.historyIndex > 0) {
+                    this.historyIndex--;
+                    this.inputEl.value = this.history[this.historyIndex];
+                } else {
+                    this.historyIndex = -1;
+                    this.inputEl.value = '';
+                }
             }
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            if (this.history.length > 0 && this.historyIndex < this.history.length - 1) {
-                this.historyIndex++;
-                this.inputEl.value = this.history[this.historyIndex];
-                this.onInput();
-            }
-        } else if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            if (this.historyIndex > 0) {
-                this.historyIndex--;
-                this.inputEl.value = this.history[this.historyIndex];
-            } else {
-                this.historyIndex = -1;
-                this.inputEl.value = '';
-            }
-            this.onInput();
         }
     }
 
@@ -3713,6 +3817,7 @@ class ConsoleManager {
     }
 
     executeCommand(text) {
+        this.hideSuggestions();
         this.log(`> ${text}`);
         const [command, ...args] = text.trim().split(/\s+/);
         if (this.commands[command]) {
@@ -3741,91 +3846,91 @@ const consoleManager = new ConsoleManager();
 // --- COMMAND DEFINITIONS ---
 consoleManager.registerCommand('give', (args) => {
     const [type, name, value = '1'] = args;
-    if (!type || !name) throw new Error('Usage: give <type> <name> [value]');
-
-    const numValue = parseInt(value, 10);
-    if (isNaN(numValue)) throw new Error('INVALID_VALUE');
+    if (!type) throw new Error("Usage: give <type> ..., where type is 'item', 'coins', 'xp', or 'stat'");
 
     switch (type) {
         case 'item': {
-    const isWeapon = !!weaponsCatalog[name];
-    const isPassive = !!passiveMap[name];
+            if (!name) throw new Error('Usage: give item <name> [level/amount]');
+            const numValue = parseInt(value, 10);
+            if (isNaN(numValue)) throw new Error('Invalid level/amount');
 
-    if (!isWeapon && !isPassive) {
-        throw new Error(`Item '${name}' NOT_FOUND`);
-    }
+            const isWeapon = !!weaponsCatalog[name];
+            const isPassive = !!passiveMap[name];
 
-    if (isWeapon) {
-        let weaponInstance = player.weaponSlots.find(w => w && w.id === name);
-        if (weaponInstance) { // Already has weapon, level up
-            const currentLevel = weaponInstance.level;
-            const targetLevel = Math.min(weaponInstance.maxLevel, currentLevel + numValue);
-            if (currentLevel >= weaponInstance.maxLevel) {
-                throw new Error('MAX_LEVEL_REACHED');
+            if (!isWeapon && !isPassive) throw new Error(`Item '${name}' not found`);
+
+            if (isWeapon) {
+                let weaponInstance = player.weaponSlots.find(w => w && w.id === name);
+                if (weaponInstance) {
+                    const currentLevel = weaponInstance.level;
+                    if (currentLevel >= weaponInstance.maxLevel) throw new Error('Weapon at max level');
+                    const targetLevel = Math.min(weaponInstance.maxLevel, currentLevel + numValue);
+                    weaponInstance.applyLevelEffects(targetLevel);
+                    updateInventoryUI();
+                    return `Leveled up ${weaponInstance.name} to level ${targetLevel}.`;
+                } else {
+                    const freeSlot = player.weaponSlots.findIndex(s => !s);
+                    if (freeSlot === -1) throw new Error('Weapon slots are full');
+                    const newWeapon = cloneWeaponTemplate(weaponsCatalog[name]);
+                    player.weaponSlots[freeSlot] = newWeapon;
+                    const targetLevel = Math.min(newWeapon.maxLevel, numValue);
+                    newWeapon.applyLevelEffects(targetLevel);
+                    updateInventoryUI();
+                    return `Gave player ${newWeapon.name} (level ${newWeapon.level}).`;
+                }
+            } else { // isPassive
+                const passiveTemplate = passiveMap[name];
+                const currentLevel = player.passiveLevels[name] || 0;
+                if (currentLevel > 0) {
+                    if (currentLevel >= passiveTemplate.maxLevel) throw new Error('Passive at max level');
+                    const targetLevel = Math.min(passiveTemplate.maxLevel, currentLevel + numValue);
+                    for (let i = currentLevel; i < targetLevel; i++) {
+                        levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+                    }
+                    player.passiveLevels[name] = targetLevel;
+                    updatePassiveSlotsUI();
+                    return `Leveled up ${passiveTemplate.name} to level ${targetLevel}.`;
+                } else {
+                    const freeSlot = player.passiveSlots.findIndex(s => !s);
+                    if (freeSlot === -1) throw new Error('Passive slots are full');
+                    player.passiveSlots[freeSlot] = name;
+                    const targetLevel = Math.min(passiveTemplate.maxLevel, numValue);
+                    for (let i = 0; i < targetLevel; i++) {
+                        levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+                    }
+                    player.passiveLevels[name] = targetLevel;
+                    updatePassiveSlotsUI();
+                    return `Gave player ${passiveTemplate.name} (level ${targetLevel}).`;
+                }
             }
-            weaponInstance.applyLevelEffects(targetLevel);
-            updateInventoryUI();
-            return `Leveled up ${weaponInstance.name} to level ${targetLevel}.`;
-        } else { // New weapon
-            const freeSlot = player.weaponSlots.findIndex(s => !s);
-            if (freeSlot === -1) {
-                throw new Error('SLOTS_FULL');
-            }
-            const template = weaponsCatalog[name];
-            const newWeapon = cloneWeaponTemplate(template);
-            player.weaponSlots[freeSlot] = newWeapon;
-            const targetLevel = Math.min(newWeapon.maxLevel, numValue);
-            newWeapon.applyLevelEffects(targetLevel);
-            updateInventoryUI();
-            return `Gave player ${newWeapon.name} (level ${newWeapon.level}).`;
         }
-    } else { // isPassive
-        const passiveTemplate = passiveMap[name];
-        const currentLevel = player.passiveLevels[name] || 0;
-
-        if (currentLevel > 0) { // Already has passive, level up
-            if (currentLevel >= passiveTemplate.maxLevel) {
-                throw new Error('MAX_LEVEL_REACHED');
-            }
-            const targetLevel = Math.min(passiveTemplate.maxLevel, currentLevel + numValue);
-            for (let i = currentLevel; i < targetLevel; i++) {
-                levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
-            }
-            player.passiveLevels[name] = targetLevel;
-            updateInventoryUI();
-            updatePassiveSlotsUI();
-            return `Leveled up ${passiveTemplate.name} to level ${targetLevel}.`;
-        } else { // New passive
-            const freeSlot = player.passiveSlots.findIndex(s => !s);
-            if (freeSlot === -1) {
-                throw new Error('SLOTS_FULL');
-            }
-            player.passiveSlots[freeSlot] = name;
-            const targetLevel = Math.min(passiveTemplate.maxLevel, numValue);
-            for (let i = 0; i < targetLevel; i++) {
-                levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
-            }
-            player.passiveLevels[name] = targetLevel;
-            updateInventoryUI();
-            updatePassiveSlotsUI();
-            return `Gave player ${passiveTemplate.name} (level ${targetLevel}).`;
+        case 'coins': {
+            if (!name) throw new Error('Usage: give coins <amount>');
+            const amount = parseInt(name, 10);
+            if (isNaN(amount)) throw new Error('Invalid amount for coins');
+            player.coins += amount;
+            return `Added ${amount} coins.`;
         }
-    }
-}
-        case 'coins':
-            player.coins += numValue;
-            return `Added ${numValue} coins.`;
-        case 'xp':
-            player.addXP(numValue);
-            return `Added ${numValue} XP.`;
+        case 'xp': {
+            if (!name) throw new Error('Usage: give xp <amount>');
+            const amount = parseInt(name, 10);
+            if (isNaN(amount)) throw new Error('Invalid amount for xp');
+            player.addXP(amount);
+            return `Added ${amount} XP.`;
+        }
         case 'stat': {
-            const statName = Object.keys(player.stats).find(s => s.toLowerCase() === name.toLowerCase());
-            if (!statName) throw new Error(`Stat '${name}' NOT_FOUND`);
+            if (!name || value === '1') throw new Error('Usage: give stat <name> <value>');
+            const statName = Object.keys(player.stats).find(s => s.toLowerCase().replace(' ', '') === name.toLowerCase());
+            if (!statName) throw new Error(`Stat '${name}' not found`);
+            const numValue = parseInt(value, 10);
+            if (isNaN(numValue)) throw new Error('Invalid value for stat');
             player.stats[statName] += numValue;
+            // Handle special cases like max health
+            if (statName === "Max Health") player.maxhp = player.stats[statName];
             return `Increased ${statName} by ${numValue}.`;
         }
         default:
-            throw new Error('INVALID_TYPE');
+            throw new Error(`Invalid type '${type}'.`);
     }
 }, 'Gives the player items, currency, or stats.', (args) => {
     const [type, name] = args;
@@ -3834,10 +3939,10 @@ consoleManager.registerCommand('give', (args) => {
     }
     if (type === 'item' && args.length <= 2) {
         const allItems = { ...weaponsCatalog, ...passiveMap };
-        return Object.values(allItems).map(i => i.id).filter(id => id.startsWith(name || ''));
+        return Object.values(allItems).map(i => i.id).filter(id => !id.includes("holy_wand") && id.startsWith(name || ''));
     }
     if (type === 'stat' && args.length <= 2) {
-        return Object.keys(player.stats).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+        return Object.keys(player.stats).map(s => s.replace(' ', '')).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
     }
     return [];
 });
@@ -3846,7 +3951,7 @@ consoleManager.registerCommand('set', (args) => {
     const [type, name, value] = args;
     if (!type || !name || value === undefined) throw new Error('Usage: set <type> <name> <value>');
 
-    const numValue = parseFloat(value);
+    const numValue = parseInt(value, 10);
     if (isNaN(numValue)) throw new Error('INVALID_VALUE');
 
     switch (type) {
@@ -3925,6 +4030,29 @@ consoleManager.registerCommand('clear', () => {
     consoleManager.outputEl.innerHTML = '';
     return 'Console cleared.';
 }, 'Clears the console output.');
+
+consoleManager.registerCommand('give_pickup', (args) => {
+    const [pickupName] = args;
+    if (!pickupName) throw new Error('Usage: give_pickup <name>');
+
+    const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+    if (!pickupTypes.includes(pickupName)) {
+        throw new Error(`Invalid pickup name: ${pickupName}`);
+    }
+
+    const p = new Pickup(); // Create a temporary pickup
+    p.spawn(player.x, player.y, pickupName);
+    p.collect();
+
+    return `Collected pickup: ${pickupName}`;
+}, 'Spawns and instantly collects a pickup item.', (args) => {
+    const [pickupName] = args;
+    if (args.length <= 1) {
+        const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+        return pickupTypes.filter(name => name.startsWith(pickupName || ''));
+    }
+    return [];
+});
  
 </script> 
 </body> 

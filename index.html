@@ -1233,7 +1233,7 @@ class DemonicRealmEffect {
 
                         if (hpBefore > 0 && e.hp <= 0) {
                             dropXP(e.x, e.y, EnemyTypes[e.type].xpValue * 2);
-                            e.hp = -1; // Prevent double XP drop
+                            e.xpDropped = true;
                         }
                     }
                 }
@@ -2884,6 +2884,7 @@ class Enemy {
         this.slowFactor = 1;
         this.isFrozen = false;
         this.freezeTimer = 0;
+        this.xpDropped = false;
 
     }
 
@@ -2928,8 +2929,9 @@ class Enemy {
 
     // ----- Death Check -----
     if (this.hp <= 0) {
-        if (this.hp !== -1) { // Not killed by Demonic Realm
+        if (!this.xpDropped) {
             dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
+            this.xpDropped = true;
         }
         const luck = 1 + (player.stats.Luck / 100);
         if (Math.random() < 0.01 * luck) {

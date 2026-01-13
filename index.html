@@ -2744,7 +2744,7 @@ class Enemy {
 
     // ----- Death Check -----
     if (this.hp <= 0) {
-        if (this.hp > -1) { // Not killed by Demonic Realm
+        if (this.hp !== -1) { // Not killed by Demonic Realm
             dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
         }
         const luck = 1 + (player.stats.Luck / 100);
@@ -3846,7 +3846,7 @@ const consoleManager = new ConsoleManager();
 // --- COMMAND DEFINITIONS ---
 consoleManager.registerCommand('give', (args) => {
     const [type, name, value = '1'] = args;
-    if (!type) throw new Error("Usage: give <type> ..., where type is 'item', 'coins', 'xp', or 'stat'");
+    if (!type) throw new Error("Usage: give <type> ..., where type is 'item', 'coins', 'xp', 'stat', or 'pick_up'");
 
     switch (type) {
         case 'item': {
@@ -3925,9 +3925,17 @@ consoleManager.registerCommand('give', (args) => {
             const numValue = parseInt(value, 10);
             if (isNaN(numValue)) throw new Error('Invalid value for stat');
             player.stats[statName] += numValue;
-            // Handle special cases like max health
             if (statName === "Max Health") player.maxhp = player.stats[statName];
             return `Increased ${statName} by ${numValue}.`;
+        }
+        case 'pick_up': {
+            if (!name) throw new Error('Usage: give pick_up <name>');
+            const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+            if (!pickupTypes.includes(name)) throw new Error(`Invalid pickup name: ${name}`);
+            const p = new Pickup();
+            p.spawn(player.x, player.y, name);
+            p.collect();
+            return `Collected pickup: ${name}`;
         }
         default:
             throw new Error(`Invalid type '${type}'.`);
@@ -3935,7 +3943,7 @@ consoleManager.registerCommand('give', (args) => {
 }, 'Gives the player items, currency, or stats.', (args) => {
     const [type, name] = args;
     if (args.length <= 1) {
-        return ['item', 'coins', 'xp', 'stat'].filter(s => s.startsWith(type || ''));
+        return ['item', 'coins', 'xp', 'stat', 'pick_up'].filter(s => s.startsWith(type || ''));
     }
     if (type === 'item' && args.length <= 2) {
         const allItems = { ...weaponsCatalog, ...passiveMap };
@@ -3944,6 +3952,10 @@ consoleManager.registerCommand('give', (args) => {
     if (type === 'stat' && args.length <= 2) {
         return Object.keys(player.stats).map(s => s.replace(' ', '')).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
     }
+    if (type === 'pick_up' && args.length <= 2) {
+        const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+        return pickupTypes.filter(n => n.startsWith(name || ''));
+    }
     return [];
 });
 
@@ -3951,24 +3963,25 @@ consoleManager.registerCommand('set', (args) => {
     const [type, name, value] = args;
     if (!type || !name || value === undefined) throw new Error('Usage: set <type> <name> <value>');
 
-    const numValue = parseInt(value, 10);
-    if (isNaN(numValue)) throw new Error('INVALID_VALUE');
-
     switch (type) {
-        case 'time':
+        case 'time': {
             const minutes = parseInt(name, 10);
             const seconds = value ? parseInt(value, 10) : 0;
             if (isNaN(minutes) || isNaN(seconds)) throw new Error('Usage: set time <minutes> [seconds]');
             gameTime = minutes * 60 + seconds;
             return `Game time set to ${minutes}m ${seconds}s.`;
+        }
         case 'stat': {
-            const statName = Object.keys(player.stats).find(s => s.toLowerCase() === name.toLowerCase());
-            if (!statName) throw new Error(`Stat '${name}' NOT_FOUND`);
+            const numValue = parseInt(value, 10);
+            if (isNaN(numValue)) throw new Error('Invalid value for stat');
+            const statName = Object.keys(player.stats).find(s => s.toLowerCase().replace(/ /g, '') === name.toLowerCase());
+            if (!statName) throw new Error(`Stat '${name}' not found`);
             player.stats[statName] = numValue;
+            if (statName === "Max Health") player.maxhp = player.stats[statName];
             return `Set ${statName} to ${numValue}.`;
         }
         default:
-            throw new Error('INVALID_TYPE');
+            throw new Error(`Invalid type '${type}'.`);
     }
 }, 'Sets a game value or player stat.', (args) => {
     const [type, name] = args;
@@ -3976,7 +3989,7 @@ consoleManager.registerCommand('set', (args) => {
         return ['time', 'stat'].filter(s => s.startsWith(type || ''));
     }
      if (type === 'stat' && args.length <= 2) {
-        return Object.keys(player.stats).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+        return Object.keys(player.stats).map(s => s.replace(/ /g, '')).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
     }
     return [];
 });
@@ -4030,29 +4043,6 @@ consoleManager.registerCommand('clear', () => {
     consoleManager.outputEl.innerHTML = '';
     return 'Console cleared.';
 }, 'Clears the console output.');
-
-consoleManager.registerCommand('give_pickup', (args) => {
-    const [pickupName] = args;
-    if (!pickupName) throw new Error('Usage: give_pickup <name>');
-
-    const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
-    if (!pickupTypes.includes(pickupName)) {
-        throw new Error(`Invalid pickup name: ${pickupName}`);
-    }
-
-    const p = new Pickup(); // Create a temporary pickup
-    p.spawn(player.x, player.y, pickupName);
-    p.collect();
-
-    return `Collected pickup: ${pickupName}`;
-}, 'Spawns and instantly collects a pickup item.', (args) => {
-    const [pickupName] = args;
-    if (args.length <= 1) {
-        const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
-        return pickupTypes.filter(name => name.startsWith(pickupName || ''));
-    }
-    return [];
-});
  
 </script> 
 </body> 

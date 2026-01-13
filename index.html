@@ -1208,18 +1208,23 @@ class DemonicRealmEffect {
 
             const pullStrength = 1 + (player.stats.Curse / 100);
 
+            // Pull logic runs every frame for enemies in range.
             for (const e of enemies.active) {
                 const dx = this.x - e.x;
                 const dy = this.y - e.y;
                 const dist = Math.hypot(dx, dy);
 
-                if (dist < this.radius + e.r && dist > 0) {
-                    if (!EnemyTypes[e.type].isBoss) {
-                        e.x += (dx / dist) * 60 * pullStrength * dt;
-                        e.y += (dy / dist) * 60 * pullStrength * dt;
-                    }
+                if (dist < this.radius + e.r && dist > 0 && !EnemyTypes[e.type].isBoss) {
+                    e.x += (dx / dist) * 60 * pullStrength * dt;
+                    e.y += (dy / dist) * 60 * pullStrength * dt;
+                }
+            }
 
-                    if (gameTime - this.lastDmgTime > 0.2) {
+            // Damage logic is throttled to run every 0.2 seconds.
+            if (gameTime - this.lastDmgTime > 0.2) {
+                this.lastDmgTime = gameTime;
+                for (const e of enemies.active) {
+                    if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
                         const hpBefore = e.hp;
                         const finalDmg = Math.max(1, this.damage - e.armor);
                         e.hp -= finalDmg;
@@ -1232,9 +1237,6 @@ class DemonicRealmEffect {
                         }
                     }
                 }
-            }
-            if (gameTime - this.lastDmgTime > 0.2) {
-                 this.lastDmgTime = gameTime;
             }
         }
     }
@@ -2467,6 +2469,7 @@ const chestController = {
         this.isOpening = true;
         paused = true;
         this.rewards = this.determineRewards();
+        this.rewardsDisplayed = false;
         
         document.getElementById('chestScreen').style.display = 'flex';
         document.getElementById('skipChestBtn').style.display = 'block';

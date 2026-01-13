@@ -82,3 +82,27 @@ Displays a list of all available commands or provides details on a specific one.
 Clears all text from the console output.
 
 **Usage:** `clear`
+
+---
+
+### 6. `heal`
+Restores the player's health to its maximum value.
+
+**Usage:** `heal`
+
+---
+
+### 7. `god`
+Toggles invincibility for the player.
+
+**Usage:** `god [on|off]`
+
+| Argument (Optional) | Description |
+| :--- | :--- |
+| `on` | Explicitly enables god mode. |
+| `off` | Explicitly disables god mode. |
+| (none) | Toggles the current state of god mode. |
+
+**Examples:**
+- `god` - Toggles god mode.
+- `god on` - Turns god mode on.

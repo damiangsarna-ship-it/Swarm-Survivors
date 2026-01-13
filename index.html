@@ -343,18 +343,20 @@ class Pool{
 } 
  
 // ------------------- Hitmarks ------------------- 
-class Hitmark { 
-  constructor() { this.active=false; this.x=0; this.y=0; this.text=''; this.color='#fff'; this.alpha=1; this.vy=-30; this.t=0; this.life=0.9; this.size=16; } 
-  spawn(x, y, dmg, color='#fff'){ 
-    this.x=x; this.y=y; this.color=color; 
-    this.text = typeof dmg==='number'?Math.round(dmg):String(dmg); 
-    let n=Number(dmg); if(isNaN(n)) n=1; 
-    this.size=Math.max(12,Math.min(28,14+n/4)); 
-    this.alpha=1; this.vy=-30; this.t=0; this.life=0.9; this.active=true; 
-  } 
-  update(dt){ if(!this.active) return; this.t+=dt; this.y+=this.vy*dt; this.alpha=Math.max(0,1-this.t/this.life); if(this.t>=this.life) this.active=false; } 
-  render(){ if(!this.active) return; ctx.save(); ctx.globalAlpha=this.alpha; ctx.fillStyle=this.color; ctx.font=`${Math.round(this.size)}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.text,this.x,this.y); ctx.restore(); } 
-} 
+class Hitmark {
+    constructor() { this.active = false; this.x = 0; this.y = 0; this.text = ''; this.color = '#fff'; this.alpha = 1; this.vy = -30; this.t = 0; this.life = 0.9; this.size = 16; this.isCrit = false; }
+    spawn(x, y, dmg, color = '#fff', isCrit = false) {
+        this.x = x; this.y = y; this.color = color;
+        this.text = typeof dmg === 'number' ? Math.round(dmg) : String(dmg);
+        let n = Number(dmg); if (isNaN(n)) n = 1;
+        this.size = Math.max(12, Math.min(28, 14 + n / 4));
+        if (isCrit) this.size *= 1.25;
+        this.alpha = 1; this.vy = -30; this.t = 0; this.life = 0.9; this.active = true;
+        this.isCrit = isCrit;
+    }
+    update(dt) { if (!this.active) return; this.t += dt; this.y += this.vy * dt; this.alpha = Math.max(0, 1 - this.t / this.life); if (this.t >= this.life) this.active = false; }
+    render() { if (!this.active) return; ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; const fontWeight = this.isCrit ? 'bold ' : ''; ctx.font = `${fontWeight}${Math.round(this.size)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(this.text, this.x, this.y); ctx.restore(); }
+}
 const hitmarks = new Pool(()=>new Hitmark(),50); 
  
 // ------------------- Player ------------------- 
@@ -384,6 +386,7 @@ class Player{
     this.kills = 0;
     this.flameBreath = { active: false, timer: 0, damage: 0 };
     this.pendingLevelUps = 0;
+    this.godMode = false;
   } 
  
   update(dt){ 
@@ -915,10 +918,13 @@ class StaticEffect {
         this.duration = 0;
         this.elapsed = 0;
         this.hitEnemies = new Set();
-        this.renderFunc = null; // For custom rendering
+        this.renderFunc = null;
+        this.canCrit = false;
+        this.isExtendedSword = false;
+        this.hitEnemiesForExtension = new Set();
     }
 
-    spawn(x, y, width, height, angle, damage, duration, renderFunc = null) {
+    spawn(x, y, width, height, angle, damage, duration, renderFunc = null, canCrit = false) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -930,6 +936,9 @@ class StaticEffect {
         this.elapsed = 0;
         this.hitEnemies.clear();
         this.renderFunc = renderFunc;
+        this.canCrit = canCrit;
+        this.isExtendedSword = false;
+        this.hitEnemiesForExtension.clear();
     }
 
     update(dt) {
@@ -941,36 +950,59 @@ class StaticEffect {
             return;
         }
 
-        // Broad phase collision check
-        const aabb = {
-            cx: this.x,
-            cy: this.y,
-            halfWidth: Math.max(this.width, this.height) / 2
-        };
+        const aabb = { cx: this.x, cy: this.y, halfWidth: Math.max(this.width, this.height) / 2 };
 
         for (const e of enemies.active) {
             if (this.hitEnemies.has(e)) continue;
 
-            // Simple circle-AABB broad phase
-            if (Math.abs(e.x - aabb.cx) > aabb.halfWidth + e.r ||
-                Math.abs(e.y - aabb.cy) > aabb.halfWidth + e.r) {
+            if (Math.abs(e.x - aabb.cx) > aabb.halfWidth + e.r || Math.abs(e.y - aabb.cy) > aabb.halfWidth + e.r) {
                 continue;
             }
 
-            // Narrow phase (OBB vs Circle)
             const dx = e.x - this.x;
             const dy = e.y - this.y;
             const rotatedX = dx * Math.cos(-this.angle) - dy * Math.sin(-this.angle);
             const rotatedY = dx * Math.sin(-this.angle) + dy * Math.cos(-this.angle);
 
-            if (Math.abs(rotatedX) < this.width / 2 + e.r &&
-                Math.abs(rotatedY) < this.height / 2 + e.r) {
-                
-                const finalDmg = Math.max(1, this.damage - e.armor);
+            if (Math.abs(rotatedX) < this.width / 2 + e.r && Math.abs(rotatedY) < this.height / 2 + e.r) {
+                let finalDmg = this.damage;
+                let isCrit = false;
+                if (this.canCrit) {
+                    const critChance = player.stats.Luck / 100;
+                    if (Math.random() < critChance) {
+                        isCrit = true;
+                        finalDmg *= 2;
+                    }
+                }
+
+                finalDmg = Math.max(1, finalDmg - e.armor);
                 e.hp -= finalDmg;
                 const h = hitmarks.spawn();
-                h.spawn(e.x, e.y, finalDmg, "#e6e6fa"); // Lavender color for sword
+                const hitmarkColor = isCrit ? "#ff0000" : "#e6e6fa";
+                h.spawn(e.x, e.y, finalDmg, hitmarkColor, isCrit);
                 this.hitEnemies.add(e);
+
+                if (this.isExtendedSword && !this.hitEnemiesForExtension.has(e)) {
+                    this.hitEnemiesForExtension.add(e);
+
+                    let newTarget = null;
+                    let minDistance = Infinity;
+                    enemies.active.forEach(enemy => {
+                        if (enemy !== e && !this.hitEnemies.has(enemy)) {
+                            const distance = Math.hypot(enemy.x - e.x, enemy.y - e.y);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                newTarget = enemy;
+                            }
+                        }
+                    });
+
+                    if (newTarget) {
+                        const extensionAngle = Math.atan2(newTarget.y - e.y, newTarget.x - e.y);
+                        const extensionEffect = staticEffects.spawn();
+                        extensionEffect.spawn(e.x, e.y, this.width * 0.7, this.height * 0.7, extensionAngle, this.damage * 0.75, 0.25, renderExtendedSwordSlash, true);
+                    }
+                }
             }
         }
     }
@@ -1182,8 +1214,10 @@ class DemonicRealmEffect {
                 const dist = Math.hypot(dx, dy);
 
                 if (dist < this.radius + e.r && dist > 0) {
-                    e.x += (dx / dist) * 250 * pullStrength * dt;
-                    e.y += (dy / dist) * 250 * pullStrength * dt;
+                    if (!EnemyTypes[e.type].isBoss) {
+                        e.x += (dx / dist) * 60 * pullStrength * dt;
+                        e.y += (dy / dist) * 60 * pullStrength * dt;
+                    }
 
                     if (gameTime - this.lastDmgTime > 0.2) {
                         const hpBefore = e.hp;
@@ -1645,6 +1679,31 @@ magnetic_field: new Weapon({
     maxLevel: 1,
     isEvolved: true,
     desc: "Creates homing zones of energy that chase the nearest enemy."
+}),
+extended_sword: new Weapon({
+    id: "extended_sword",
+    name: "Extended Sword",
+    icon: "🗡️",
+    baseCooldown: 1.8,
+    baseDamage: 55, // 50 * 1.1
+    fireFunc: extendedSwordFire,
+    level: 1,
+    maxLevel: 1,
+    isEvolved: true,
+    desc: "Slashes enemies and creates seeking extensions. Has a chance to critically strike."
+}),
+healing_nova: new Weapon({
+    id: "healing_nova",
+    name: "Healing Nova",
+    icon: "💖",
+    baseCooldown: 3.0,
+    baseDamage: 40,
+    baseArea: 1.25,
+    fireFunc: healingNovaFire,
+    level: 1,
+    maxLevel: 1,
+    isEvolved: true,
+    desc: "Emits multiple healing pulses that damage enemies and restore health on hit."
 })
 };
 
@@ -1664,6 +1723,14 @@ const evolutionRecipes = {
     "hallowed_ground": {
         passive: "magnet_core",
         evolvedId: "magnetic_field"
+    },
+    "sword": {
+        passive: "four_leaf",
+        evolvedId: "extended_sword"
+    },
+    "nova_pulse": {
+        passive: "healing_balm",
+        evolvedId: "healing_nova"
     }
 };
 
@@ -1674,6 +1741,30 @@ for (const baseId in evolutionRecipes) {
 
 let thunderbolts = [];
 let novaPulses = [];
+
+function healingNovaFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+    const areaBonus = (w.baseArea || 1) * (1 + (playerRef.stats["Area"] || 0) / 100);
+    const mightBonus = 1 + (playerRef.stats["Might"] || 0) / 100;
+    const pulseDelay = 200; // ms delay between pulses
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            if (paused || dead) return;
+            novaPulses.push({
+                x: playerRef.x,
+                y: playerRef.y,
+                radius: 0,
+                maxRadius: 100 * areaBonus,
+                damage: w.baseDamage * mightBonus,
+                life: 0.5,
+                hitEnemies: new Set(),
+                heals: true
+            });
+        }, i * pulseDelay);
+    }
+}
 
 function holyWandFire(playerRef, slotIndex) {
     const w = this;
@@ -1801,6 +1892,65 @@ function renderSwordSlash(effect) {
     ctx.restore();
 }
 
+function renderExtendedSwordSlash(effect) {
+    const progress = effect.elapsed / effect.duration;
+    const alpha = Math.sin(progress * Math.PI);
+
+    ctx.save();
+    ctx.translate(effect.x, effect.y);
+    ctx.rotate(effect.angle);
+    ctx.globalAlpha = alpha;
+
+    const grad = ctx.createLinearGradient(-effect.width / 2, 0, effect.width / 2, 0);
+    grad.addColorStop(0, "rgba(255, 220, 180, 0)");
+    grad.addColorStop(0.5, "rgba(255, 255, 255, 1)");
+    grad.addColorStop(1, "rgba(255, 220, 180, 0)");
+
+    ctx.fillStyle = grad;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = 'gold';
+    ctx.fillRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+
+    ctx.restore();
+}
+
+function extendedSwordFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 2 + Math.floor(playerRef.stats["Amount"] || 0);
+    const area = 1.1 * (1 + (playerRef.stats.Area || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const duration = 0.25;
+    const slashDelay = 150;
+
+    const sortedEnemies = [...enemies.active].sort((a, b) =>
+        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) -
+        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
+    );
+
+    const target = sortedEnemies[0] || null;
+    const baseAngle = target ? Math.atan2(target.y - playerRef.y, target.x - playerRef.x) : playerRef.angle;
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            const angle = baseAngle + (i % 2 === 1 ? Math.PI : 0);
+            const spawnDist = 40;
+            const x = playerRef.x + Math.cos(angle) * spawnDist;
+            const y = playerRef.y + Math.sin(angle) * spawnDist;
+
+            const slashWidth = 110 * area;
+            const slashHeight = 35 * area;
+
+            const effect = staticEffects.spawn();
+            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderExtendedSwordSlash, true);
+            effect.isExtendedSword = true;
+        }, i * slashDelay);
+    }
+}
+
 function swordFire(playerRef, slotIndex) {
     const w = this;
     const amount = 1 + (w.level >= 2 ? 1 : 0) + Math.floor(playerRef.stats["Amount"] || 0);
@@ -1828,7 +1978,7 @@ function swordFire(playerRef, slotIndex) {
             const slashHeight = 30 * area;
 
             const effect = staticEffects.spawn();
-            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderSwordSlash);
+            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderSwordSlash, false);
         }, i * slashDelay);
     }
 }
@@ -2816,12 +2966,14 @@ class Enemy {
         }
 
         if (Math.hypot(player.x - this.x, player.y - this.y) < this.r + player.r && player.invuln <= 0) {
-            const damage = Math.max(1, this.dmg - player.stats.Armor);
-            player.hp -= damage;
-            player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow);
-            player.invuln = 0.2;
-            const h = hitmarks.spawn();
-            h.spawn(this.x, this.y, damage, "#f00");
+            if (!player.godMode) {
+                const damage = Math.max(1, this.dmg - player.stats.Armor);
+                player.hp -= damage;
+                player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow);
+                player.invuln = 0.2;
+                const h = hitmarks.spawn();
+                h.spawn(this.x, this.y, damage, "#f00");
+            }
         }
     }
 }
@@ -3584,8 +3736,11 @@ function update(dt){
           const finalDmg = Math.max(1, pulse.damage - e.armor);
           e.hp -= finalDmg;
           const h = hitmarks.spawn();
-          h.spawn(e.x, e.y, finalDmg, "#f66");
+          h.spawn(e.x, e.y, finalDmg, pulse.heals ? "#90ee90" : "#f66");
           pulse.hitEnemies.add(e);
+          if (pulse.heals) {
+              player.hp = Math.min(player.maxhp, player.hp + (player.stats.Recovery / 2));
+          }
         }
       }
     }
@@ -4043,6 +4198,23 @@ consoleManager.registerCommand('clear', () => {
     consoleManager.outputEl.innerHTML = '';
     return 'Console cleared.';
 }, 'Clears the console output.');
+
+consoleManager.registerCommand('heal', () => {
+    player.hp = player.maxhp;
+    return 'Player healed to full health.';
+}, 'Heals the player to their maximum health.');
+
+consoleManager.registerCommand('god', (args) => {
+    const [state] = args;
+    if (state === 'on') {
+        player.godMode = true;
+    } else if (state === 'off') {
+        player.godMode = false;
+    } else {
+        player.godMode = !player.godMode;
+    }
+    return `God mode ${player.godMode ? 'enabled' : 'disabled'}.`;
+}, 'Toggles god mode, making the player invincible. Usage: god [on|off]');
  
 </script> 
 </body> 

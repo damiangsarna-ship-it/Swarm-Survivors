@@ -124,6 +124,70 @@ button:active { transform:scale(0.95); }
  
 /* --- Additional small style fallbacks for old UI --- */ 
 .weaponSlots, .passiveSlots{ display:none; } /* keep hidden (we update DOM bars instead) */ 
+
+/* --- CONSOLE STYLES --- */
+#console {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 50%;
+    height: 300px;
+    background: rgba(20, 20, 20, 0.8);
+    border-top: 2px solid #333;
+    display: none;
+    flex-direction: column;
+    font-family: monospace;
+    color: #eee;
+    z-index: 200;
+    pointer-events: auto;
+}
+#consoleOutput {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+#consoleInput {
+    border: none;
+    background: #111;
+    padding: 10px;
+    color: #eee;
+    font-family: monospace;
+    font-size: 14px;
+    outline: none;
+    border-top: 2px solid #333;
+}
+.log-error { color: #ff6b6b; }
+.log-success { color: #6bff94; }
+.log-info { color: #6b94ff; }
+#autocompleteList {
+    position: absolute;
+    bottom: 100%; /* Position above the input bar */
+    left: 0;
+    right: 0;
+    background: #282828;
+    border-top: 1px solid #444;
+    border-left: 1px solid #444;
+    border-right: 1px solid #444;
+    max-height: 140px;
+    overflow-y: auto;
+    z-index: 210; /* Above console */
+    display: none; /* Initially hidden */
+}
+.autocomplete-item {
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: pre;
+}
+.autocomplete-item:hover {
+    background: #3f3f3f;
+}
+.autocomplete-item.selected {
+    background: #007acc;
+    color: white;
+}
  
 </style> 
 </head> 
@@ -131,8 +195,14 @@ button:active { transform:scale(0.95); }
  
 <canvas id="gameCanvas"></canvas> 
  
-<div id="uiLayer"> 
-  <div id="flashEffect" style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0); z-index:9998; pointer-events:none; display:block;"></div>
+<div id="uiLayer">
+    <div id="console">
+        <div id="consoleOutput"></div>
+        <div style="position: relative;">
+            <div id="autocompleteList"></div>
+            <input type="text" id="consoleInput" placeholder="Enter command..." autocomplete="off" />
+        </div>
+    </div>
   <div id="stats"></div> 
  
   <div class="bar-container hud-element" id="weaponBar"></div> 
@@ -168,6 +238,7 @@ button:active { transform:scale(0.95); }
       <button id="skipChestBtn" style="margin-top: 20px;">Skip</button>
       <button id="closeChestBtn" style="margin-top: 20px; display: none;">Claim</button>
   </div>
+    <div id="flashOverlay" style="position:absolute; top:0; left:0; width:100%; height:100%; background:white; opacity:0; pointer-events:none; z-index:999;"></div>
 </div> 
  
 <script> 
@@ -185,6 +256,9 @@ const input={up:0,down:0,left:0,right:0};
 let paused=false; 
 let dead=false; 
 let gameTime = 0; 
+let timeStopEffect = { active: false, timer: 0 };
+const CHUNK_SIZE = 1000;
+const generatedChunks = new Set();
  
 // Input handling 
 window.addEventListener("keydown",e=>{ 
@@ -194,43 +268,25 @@ window.addEventListener("keydown",e=>{
   if(k==="s" || e.key==="ArrowDown") input.down = 1; 
   if(k==="a" || e.key==="ArrowLeft") input.left = 1; 
   if(k==="d" || e.key==="ArrowRight") input.right = 1; 
-  if(k==="p" || k==="Escape" || k===" "){ 
+  if(k==="p" || k==="Escape" || k===" "){
+    const consoleInput = document.getElementById('consoleInput');
+    if (document.activeElement === consoleInput) return;
+
     const levelEl = document.getElementById("levelUpScreen"); 
     if(levelEl.style.display === "flex") return; 
     togglePause(); 
   }
-  if (e.key === '`') {
-    // Grant all base weapons for evolution at max level
-    player.weaponSlots[0] = cloneWeaponTemplate(weaponsCatalog.sword);
-    player.weaponSlots[0].applyLevelEffects(8);
-    player.weaponSlots[1] = cloneWeaponTemplate(weaponsCatalog.nova_pulse);
-    player.weaponSlots[1].applyLevelEffects(8);
-    player.weaponSlots[2] = cloneWeaponTemplate(weaponsCatalog.fire_wand);
-    player.weaponSlots[2].applyLevelEffects(8);
-    player.weaponSlots[3] = cloneWeaponTemplate(weaponsCatalog.thunderbolt);
-    player.weaponSlots[3].applyLevelEffects(8);
-    player.weaponSlots[4] = cloneWeaponTemplate(weaponsCatalog.cross);
-    player.weaponSlots[4].applyLevelEffects(8);
-    
-    // Grant all necessary passives
-    if (e.key === "'") {
-        pickups.spawn().spawn(player.x, player.y + 60, 'sun');
-        pickups.spawn().spawn(player.x, player.y - 60, 'coin');
+    if (e.key === '`') {
+        e.preventDefault();
+        const consoleEl = document.getElementById('console');
+        const consoleInput = document.getElementById('consoleInput');
+        const isVisible = consoleEl.style.display === 'flex';
+        consoleEl.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            consoleInput.focus();
+        }
+        paused = !isVisible;
     }
-    player.passiveSlots[0] = 'four_leaf';
-    player.passiveLevels['four_leaf'] = 1;
-    player.passiveSlots[1] = 'healing_balm';
-    player.passiveLevels['healing_balm'] = 1;
-    player.passiveSlots[2] = 'power_crystal';
-    player.passiveLevels['power_crystal'] = 1;
-    player.passiveSlots[3] = 'mirror_sigil';
-    player.passiveLevels['mirror_sigil'] = 1;
-    player.passiveSlots[4] = 'iron_plate';
-    player.passiveLevels['iron_plate'] = 1;
-
-    updateInventoryUI();
-    chestController.openChest();
-  }
 }); 
 window.addEventListener("keyup",e=>{ 
   if(e.key==="w" || e.key==="ArrowUp") input.up = 0; 
@@ -289,18 +345,20 @@ class Pool{
 } 
  
 // ------------------- Hitmarks ------------------- 
-class Hitmark { 
-  constructor() { this.active=false; this.x=0; this.y=0; this.text=''; this.color='#fff'; this.alpha=1; this.vy=-30; this.t=0; this.life=0.9; this.size=16; } 
-  spawn(x, y, dmg, color='#fff'){ 
-    this.x=x; this.y=y; this.color=color; 
-    this.text = typeof dmg==='number'?Math.round(dmg):String(dmg); 
-    let n=Number(dmg); if(isNaN(n)) n=1; 
-    this.size=Math.max(12,Math.min(28,14+n/4)); 
-    this.alpha=1; this.vy=-30; this.t=0; this.life=0.9; this.active=true; 
-  } 
-  update(dt){ if(!this.active) return; this.t+=dt; this.y+=this.vy*dt; this.alpha=Math.max(0,1-this.t/this.life); if(this.t>=this.life) this.active=false; } 
-  render(){ if(!this.active) return; ctx.save(); ctx.globalAlpha=this.alpha; ctx.fillStyle=this.color; ctx.font=`${Math.round(this.size)}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(this.text,this.x,this.y); ctx.restore(); } 
-} 
+class Hitmark {
+    constructor() { this.active = false; this.x = 0; this.y = 0; this.text = ''; this.color = '#fff'; this.alpha = 1; this.vy = -30; this.t = 0; this.life = 0.9; this.size = 16; this.isCrit = false; }
+    spawn(x, y, dmg, color = '#fff', isCrit = false) {
+        this.x = x; this.y = y; this.color = color;
+        this.text = typeof dmg === 'number' ? Math.round(dmg) : String(dmg);
+        let n = Number(dmg); if (isNaN(n)) n = 1;
+        this.size = Math.max(12, Math.min(28, 14 + n / 4));
+        if (isCrit) this.size *= 1.25;
+        this.alpha = 1; this.vy = -30; this.t = 0; this.life = 0.9; this.active = true;
+        this.isCrit = isCrit;
+    }
+    update(dt) { if (!this.active) return; this.t += dt; this.y += this.vy * dt; this.alpha = Math.max(0, 1 - this.t / this.life); if (this.t >= this.life) this.active = false; }
+    render() { if (!this.active) return; ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; const fontWeight = this.isCrit ? 'bold ' : ''; ctx.font = `${fontWeight}${Math.round(this.size)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(this.text, this.x, this.y); ctx.restore(); }
+}
 const hitmarks = new Pool(()=>new Hitmark(),50); 
  
 // ------------------- Player ------------------- 
@@ -329,6 +387,8 @@ class Player{
     this.coins = 0;
     this.kills = 0;
     this.flameBreath = { active: false, timer: 0, damage: 0 };
+    this.pendingLevelUps = 0;
+    this.godMode = false;
   } 
  
   update(dt){ 
@@ -338,32 +398,17 @@ class Player{
     let vx=(input.right-input.left), vy=(input.down-input.up); 
     const len=Math.hypot(vx,vy)||1; 
     vx/=len; vy/=len; 
-    const speed=this.stats["Move Speed"]*(1-this.hitSlow);
+    let speed=this.stats["Move Speed"]*(1-this.hitSlow);
+    
     const nextX = this.x + vx * speed * dt;
     const nextY = this.y + vy * speed * dt;
 
-    let canMoveX = true;
-    let canMoveY = true;
-
-    for (const o of obstacles.active) {
-        // Check X-axis collision
-        if (nextX > o.x - o.width / 2 - this.r &&
-            nextX < o.x + o.width / 2 + this.r &&
-            this.y > o.y - o.height / 2 - this.r &&
-            this.y < o.y + o.height / 2 + this.r) {
-            canMoveX = false;
-        }
-        // Check Y-axis collision
-        if (this.x > o.x - o.width / 2 - this.r &&
-            this.x < o.x + o.width / 2 + this.r &&
-            nextY > o.y - o.height / 2 - this.r &&
-            nextY < o.y + o.height / 2 + this.r) {
-            canMoveY = false;
-        }
+    if (!isCollidingWithObstacle(nextX, this.y, this.r)) {
+        this.x = nextX;
     }
-
-    if (canMoveX) this.x = nextX;
-    if (canMoveY) this.y = nextY;
+    if (!isCollidingWithObstacle(this.x, nextY, this.r)) {
+        this.y = nextY;
+    }
 
     if(this.hitSlow>0) this.hitSlow-=dt;
 
@@ -404,22 +449,26 @@ class Player{
     if(this.hp===0 && !dead) triggerDeath(); 
   } 
  
-  addXP(xp){ 
-    const growthMult = 1 + (this.stats["Growth"] / 100); 
-    const gainedXP = xp * growthMult; 
-    const intPart = Math.floor(gainedXP); 
-    const frac = gainedXP - intPart; 
-    const finalXP = intPart + (Math.random() < frac ? 1 : 0); 
-    this.xp += finalXP; 
- 
-    if(this.xp >= this.xpToNext){ 
-      this.xp -= this.xpToNext; 
-      this.level++; 
-      this.xpToNext = Math.floor(this.xpToNext * 1.25); 
-      const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0"); 
-      levelUpController.onLevelUp(); 
-    } 
-  } 
+  addXP(xp){
+    const growthMult = 1 + (this.stats["Growth"] / 100);
+    const gainedXP = xp * growthMult;
+    const intPart = Math.floor(gainedXP);
+    const frac = gainedXP - intPart;
+    const finalXP = intPart + (Math.random() < frac ? 1 : 0);
+    this.xp += finalXP;
+
+    while (this.xp >= this.xpToNext) {
+        this.xp -= this.xpToNext;
+        this.level++;
+        this.xpToNext = Math.floor(this.xpToNext * 1.25);
+        this.pendingLevelUps++;
+        const h = hitmarks.spawn(); h.spawn(this.x,this.y-20,"LEVEL UP!","#ff0");
+    }
+
+    if (this.pendingLevelUps > 0 && !levelUpController.showing) {
+        levelUpController.onLevelUp();
+    }
+}
  
   render(){ 
     ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.angle); 
@@ -434,12 +483,42 @@ const player = new Player();
 // ------------------- Utilities ------------------- 
 function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); } 
 
-function getClosestPointOnRect(px, py, rx, ry, rw, rh) {
-    const halfW = rw / 2;
-    const halfH = rh / 2;
-    const cx = Math.max(-halfW, Math.min(halfW, px - rx));
-    const cy = Math.max(-halfH, Math.min(halfH, py - ry));
-    return { x: rx + cx, y: ry + cy };
+function isCollidingWithObstacle(x, y, radius = 0) {
+    for (const obstacle of obstacles.active) {
+        if (x + radius > obstacle.x && x - radius < obstacle.x + obstacle.width &&
+            y + radius > obstacle.y && y - radius < obstacle.y + obstacle.height) {
+            return obstacle;
+        }
+    }
+    return null;
+}
+
+function pushOutOfObstacles(entity) {
+    const obstacle = isCollidingWithObstacle(entity.x, entity.y);
+    if (obstacle) {
+        const closestX = clamp(entity.x, obstacle.x, obstacle.x + obstacle.width);
+        const closestY = clamp(entity.y, obstacle.y, obstacle.y + obstacle.height);
+        const dx = entity.x - closestX;
+        const dy = entity.y - closestY;
+
+        if (dx === 0 && dy === 0) { // Inside the obstacle, push to nearest edge
+            const distToLeft = entity.x - obstacle.x;
+            const distToRight = (obstacle.x + obstacle.width) - entity.x;
+            const distToTop = entity.y - obstacle.y;
+            const distToBottom = (obstacle.y + obstacle.height) - entity.y;
+
+            const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
+            if (minDist === distToLeft) entity.x = obstacle.x - 1;
+            else if (minDist === distToRight) entity.x = obstacle.x + obstacle.width + 1;
+            else if (minDist === distToTop) entity.y = obstacle.y - 1;
+            else entity.y = obstacle.y + obstacle.height + 1;
+        } else { // On the edge, push out
+            const dist = Math.hypot(dx, dy);
+            entity.x += (dx / dist);
+            entity.y += (dy / dist);
+        }
+    }
+    return entity;
 }
 
 class AudioManager {
@@ -469,6 +548,131 @@ class AudioManager {
     }
 }
 const audioManager = new AudioManager();
+
+function generateChunk(chunkX, chunkY) {
+    const chunkId = `${chunkX},${chunkY}`;
+    const chunkCenterX = chunkX * CHUNK_SIZE + CHUNK_SIZE / 2;
+    const chunkCenterY = chunkY * CHUNK_SIZE + CHUNK_SIZE / 2;
+
+    // --- Obstacle Generation ---
+    if (Math.random() < 0.4) { // 40% chance for a chunk to have obstacles
+        const numObstacles = 1 + Math.floor(Math.random() * 3); // 1-3 obstacles per chunk
+        for (let i = 0; i < numObstacles; i++) {
+            const width = 80 + Math.random() * 220;
+            const height = 80 + Math.random() * 220;
+            const x = chunkCenterX + (Math.random() - 0.5) * (CHUNK_SIZE - width);
+            const y = chunkCenterY + (Math.random() - 0.5) * (CHUNK_SIZE - height);
+            obstacles.spawn().spawn(x, y, width, height);
+        }
+    }
+
+    // --- Activation Ring Generation ---
+    // Avoid spawning in the starting chunk (0,0) and make it rare
+    if ((chunkX !== 0 || chunkY !== 0) && Math.random() < 0.05) { // 5% chance
+         const x = chunkCenterX + (Math.random() - 0.5) * (CHUNK_SIZE / 2);
+         const y = chunkCenterY + (Math.random() - 0.5) * (CHUNK_SIZE / 2);
+         if (!isCollidingWithObstacle(x, y, 60)) { // Check for collision before spawning
+            activationRings.spawn().spawn(x, y);
+         }
+    }
+
+
+    // --- Breakable Box Pattern Generation ---
+    if (Math.random() < 0.25) { // 25% chance to spawn a box pattern in a chunk
+        const patternTypes = ['line', 'cluster', 'grid2x2', 'grid3x3', 'circle', 'cross'];
+        const pattern = patternTypes[Math.floor(Math.random() * patternTypes.length)];
+        const count = 4 + Math.floor(Math.random() * 6); // 4 to 9 boxes
+        const spacing = canvas.width / 4; // Roughly 1/4 of screen width
+
+        const startX = chunkCenterX + (Math.random() - 0.5) * (CHUNK_SIZE / 2);
+        const startY = chunkCenterY + (Math.random() - 0.5) * (CHUNK_SIZE / 2);
+
+        const points = [];
+
+        switch (pattern) {
+            case 'line': {
+                const angle = Math.random() * Math.PI * 2;
+                for (let i = 0; i < count; i++) {
+                    points.push({
+                        x: startX + Math.cos(angle) * i * spacing,
+                        y: startY + Math.sin(angle) * i * spacing
+                    });
+                }
+                break;
+            }
+            case 'cluster': {
+                for (let i = 0; i < count; i++) {
+                    points.push({
+                        x: startX + (Math.random() - 0.5) * spacing * 2,
+                        y: startY + (Math.random() - 0.5) * spacing * 2
+                    });
+                }
+                break;
+            }
+            case 'grid2x2': {
+                for (let i = 0; i < 4; i++) {
+                    points.push({
+                        x: startX + (i % 2) * spacing,
+                        y: startY + Math.floor(i / 2) * spacing
+                    });
+                }
+                break;
+            }
+             case 'grid3x3': {
+                for (let i = 0; i < 9; i++) {
+                    points.push({
+                        x: startX + (i % 3) * spacing,
+                        y: startY + Math.floor(i / 3) * spacing
+                    });
+                }
+                break;
+            }
+            case 'circle': {
+                const radius = spacing * (1 + Math.random() * 0.5);
+                for (let i = 0; i < count; i++) {
+                    const angle = (i / count) * Math.PI * 2;
+                    points.push({
+                        x: startX + Math.cos(angle) * radius,
+                        y: startY + Math.sin(angle) * radius
+                    });
+                }
+                break;
+            }
+            case 'cross': {
+                points.push({ x: startX, y: startY }); // Center
+                for (let i = 0; i < Math.min(4, count - 1); i++) {
+                     points.push({ x: startX + spacing, y: startY });
+                     points.push({ x: startX - spacing, y: startY });
+                     points.push({ x: startX, y: startY + spacing });
+                     points.push({ x: startX, y: startY - spacing });
+                }
+                break;
+            }
+        }
+
+        points.forEach(p => {
+            if (!isCollidingWithObstacle(p.x, p.y, 15)) {
+                breakables.spawn().spawn(p.x, p.y);
+            }
+        });
+    }
+}
+
+function updateWorldGeneration() {
+    const playerChunkX = Math.floor(player.x / CHUNK_SIZE);
+    const playerChunkY = Math.floor(player.y / CHUNK_SIZE);
+
+    // Check a 3x3 grid around the player to generate nearby chunks
+    for (let y = playerChunkY - 1; y <= playerChunkY + 1; y++) {
+        for (let x = playerChunkX - 1; x <= playerChunkX + 1; x++) {
+            const chunkId = `${x},${y}`;
+            if (!generatedChunks.has(chunkId)) {
+                generateChunk(x, y);
+                generatedChunks.add(chunkId);
+            }
+        }
+    }
+}
 <!-- =================== MERGED GAME SCRIPT (PART 2) =================== --> 
 // ------------------- Projectile & Weapon classes (with pierce & strong mode) ------------------- 
 class Projectile{ 
@@ -670,7 +874,7 @@ class CrossProjectile {
                 const finalDmg = Math.max(1, this.damage - e.armor);
                 e.hp -= finalDmg;
                 const h = hitmarks.spawn();
-                h.spawn(e.x, e.y, finalDmg, "#ffffff");
+                h.spawn(e.x, e.y, finalDmg, "#C0C0C0");
                 this.hitEnemies.add(e);
                 // No pierce countdown, it's infinite
             }
@@ -718,108 +922,62 @@ class CrossProjectile {
 }
 const crossProjectiles = new Pool(() => new CrossProjectile(), 50);
 
-class CrucifixProjectile {
+class VulcanProjectile {
     constructor() {
         this.active = false;
         this.x = 0;
         this.y = 0;
+        this.r = 12; // Larger than fireball
         this.vx = 0;
         this.vy = 0;
         this.damage = 0;
-        this.area = 1;
-        this.duration = 2.0; // Longer travel time
-        this.speed = 180;
+        this.duration = 0;
         this.elapsed = 0;
-        this.returning = false;
-        this.ricochets = 1; // Number of times it can bounce back
-        this.rotation = 0;
-        this.rotationSpeed = 12;
-        this.armorPenetration = 0;
-        this.hitEnemies = new Set();
     }
 
-    spawn(x, y, angle, damage, area, armorPen) {
+    spawn(x, y, angle, speed, duration, damage) {
         this.x = x;
         this.y = y;
-        this.vx = Math.cos(angle) * this.speed;
-        this.vy = Math.sin(angle) * this.speed;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.duration = duration;
         this.damage = damage;
-        this.area = area;
-        this.armorPenetration = armorPen;
-        this.r = 15 * Math.sqrt(area);
-
         this.active = true;
         this.elapsed = 0;
-        this.returning = false;
-        this.ricochets = 1;
-        this.hitEnemies.clear();
-        this.rotation = 0;
     }
 
     update(dt) {
         if (!this.active) return;
         this.elapsed += dt;
-
-        // Change direction logic
-        if (!this.returning && this.elapsed >= this.duration / 2) {
-            this.returning = true;
-            this.vx *= -1;
-            this.vy *= -1;
-            this.hitEnemies.clear();
-        }
-
         if (this.elapsed >= this.duration) {
             this.active = false;
-            crucifixProjectiles.recycle(this);
+            vulcanProjectiles.recycle(this);
             return;
-        }
-
-        // Slight homing
-        let nearest = null;
-        let nd = Infinity;
-        for (const e of enemies.active) {
-            if (!this.hitEnemies.has(e)) {
-                const d = Math.hypot(e.x - this.x, e.y - this.y);
-                if (d < nd) {
-                    nd = d;
-                    nearest = e;
-                }
-            }
-        }
-        if (nearest) {
-            const steerAngle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
-            const currentAngle = Math.atan2(this.vy, this.vx);
-            let angleDiff = steerAngle - currentAngle;
-            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-
-            const steerStrength = 0.5; // Slow turning
-            const newAngle = currentAngle + Math.max(-Math.PI/4, Math.min(Math.PI/4, angleDiff)) * steerStrength * dt;
-            this.vx = Math.cos(newAngle) * this.speed;
-            this.vy = Math.sin(newAngle) * this.speed;
         }
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
-        this.rotation += this.rotationSpeed * dt;
 
-        // Collision
+        if (Math.random() < 0.5) {
+            const p = flameParticles.spawn();
+            p.spawn(this.x, this.y, 0, 0, 0.3, 5);
+        }
+
         for (const e of enemies.active) {
-            if (!this.hitEnemies.has(e) && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
-                const effectiveArmor = e.armor * (1 - this.armorPenetration);
-                const finalDmg = Math.max(1, this.damage - effectiveArmor);
+            if (Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
+                let finalDmg = this.damage;
+                if (EnemyTypes[e.type].isBoss) {
+                    finalDmg *= 2;
+                }
+                finalDmg = Math.max(1, finalDmg - e.armor);
                 e.hp -= finalDmg;
                 const h = hitmarks.spawn();
-                h.spawn(e.x, e.y, finalDmg, `hsl(${gameTime * 100 % 360}, 100%, 70%)`);
-                this.hitEnemies.add(e);
+                h.spawn(e.x, e.y, finalDmg, "#ff4500");
 
-                if (this.returning && this.ricochets > 0) {
-                    this.ricochets--;
-                    this.returning = false;
-                    this.elapsed = 0; // Reset travel timer
-                    this.vx *= -1;
-                    this.vy *= -1;
-                    this.hitEnemies.clear();
+                if (e.hp > 0) {
+                    this.active = false;
+                    vulcanProjectiles.recycle(this);
+                    return;
                 }
             }
         }
@@ -828,41 +986,16 @@ class CrucifixProjectile {
     render() {
         if (!this.active) return;
         ctx.save();
-        ctx.translate(this.x, this.y);
-        ctx.rotate(this.rotation);
-        
-        const size = 20 * this.area;
-        const grad = ctx.createLinearGradient(-size, -size, size, size);
-        grad.addColorStop(0, `hsl(${gameTime * 100 % 360}, 100%, 50%)`);
-        grad.addColorStop(1, `hsl(${(gameTime * 100 + 180) % 360}, 100%, 50%)`);
-        
-        ctx.fillStyle = grad;
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = grad;
-        ctx.strokeStyle = "rgba(0,0,0,0.5)";
-        ctx.lineWidth = 3;
-
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = 'orange';
+        ctx.fillStyle = `rgba(255, ${100 + Math.random() * 155}, 0, 1)`;
         ctx.beginPath();
-        ctx.moveTo(-size / 2, -size / 6);
-        ctx.lineTo(-size / 6, -size / 6);
-        ctx.lineTo(-size / 6, -size / 2);
-        ctx.lineTo(size / 6, -size / 2);
-        ctx.lineTo(size / 6, -size / 6);
-        ctx.lineTo(size / 2, -size / 6);
-        ctx.lineTo(size / 2, size / 6);
-        ctx.lineTo(size / 6, size / 6);
-        ctx.lineTo(size / 6, size / 2);
-        ctx.lineTo(-size / 6, size / 2);
-        ctx.lineTo(-size / 6, size / 6);
-        ctx.lineTo(-size / 2, size / 6);
-        ctx.closePath();
-        
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.stroke();
         ctx.restore();
     }
 }
-const crucifixProjectiles = new Pool(() => new CrucifixProjectile(), 50);
+const vulcanProjectiles = new Pool(() => new VulcanProjectile(), 50);
 
 class Fireball {
     constructor() {
@@ -910,21 +1043,13 @@ class Fireball {
 
         for (const e of enemies.active) {
             if (Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
-                let finalDmg = Math.max(1, this.damage - e.armor);
-                if (this.isVulcan && EnemyTypes[e.type].isBoss) {
-                    finalDmg *= 2;
-                }
+                const finalDmg = Math.max(1, this.damage - e.armor);
                 e.hp -= finalDmg;
                 const h = hitmarks.spawn();
                 h.spawn(e.x, e.y, finalDmg, "#ff8c00");
-
-                if (this.isVulcan && e.hp <= 0) {
-                    // Don't despawn, just continue
-                } else {
-                    this.active = false;
-                    fireballs.recycle(this);
-                    return;
-                }
+                this.active = false;
+                fireballs.recycle(this);
+                return;
             }
         }
     }
@@ -967,10 +1092,13 @@ class StaticEffect {
         this.duration = 0;
         this.elapsed = 0;
         this.hitEnemies = new Set();
-        this.renderFunc = null; // For custom rendering
+        this.renderFunc = null;
+        this.canCrit = false;
+        this.isExtendedSword = false;
+        this.hitEnemiesForExtension = new Set();
     }
 
-    spawn(x, y, width, height, angle, damage, duration, renderFunc = null) {
+    spawn(x, y, width, height, angle, damage, duration, renderFunc = null, canCrit = false) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -982,6 +1110,9 @@ class StaticEffect {
         this.elapsed = 0;
         this.hitEnemies.clear();
         this.renderFunc = renderFunc;
+        this.canCrit = canCrit;
+        this.isExtendedSword = false;
+        this.hitEnemiesForExtension.clear();
     }
 
     update(dt) {
@@ -993,36 +1124,59 @@ class StaticEffect {
             return;
         }
 
-        // Broad phase collision check
-        const aabb = {
-            cx: this.x,
-            cy: this.y,
-            halfWidth: Math.max(this.width, this.height) / 2
-        };
+        const aabb = { cx: this.x, cy: this.y, halfWidth: Math.max(this.width, this.height) / 2 };
 
         for (const e of enemies.active) {
             if (this.hitEnemies.has(e)) continue;
 
-            // Simple circle-AABB broad phase
-            if (Math.abs(e.x - aabb.cx) > aabb.halfWidth + e.r ||
-                Math.abs(e.y - aabb.cy) > aabb.halfWidth + e.r) {
+            if (Math.abs(e.x - aabb.cx) > aabb.halfWidth + e.r || Math.abs(e.y - aabb.cy) > aabb.halfWidth + e.r) {
                 continue;
             }
 
-            // Narrow phase (OBB vs Circle)
             const dx = e.x - this.x;
             const dy = e.y - this.y;
             const rotatedX = dx * Math.cos(-this.angle) - dy * Math.sin(-this.angle);
             const rotatedY = dx * Math.sin(-this.angle) + dy * Math.cos(-this.angle);
 
-            if (Math.abs(rotatedX) < this.width / 2 + e.r &&
-                Math.abs(rotatedY) < this.height / 2 + e.r) {
-                
-                const finalDmg = Math.max(1, this.damage - e.armor);
+            if (Math.abs(rotatedX) < this.width / 2 + e.r && Math.abs(rotatedY) < this.height / 2 + e.r) {
+                let finalDmg = this.damage;
+                let isCrit = false;
+                if (this.canCrit) {
+                    const critChance = player.stats.Luck / 100;
+                    if (Math.random() < critChance) {
+                        isCrit = true;
+                        finalDmg *= 2;
+                    }
+                }
+
+                finalDmg = Math.max(1, finalDmg - e.armor);
                 e.hp -= finalDmg;
                 const h = hitmarks.spawn();
-                h.spawn(e.x, e.y, finalDmg, "#e6e6fa"); // Lavender color for sword
+                const hitmarkColor = isCrit ? "#ff0000" : "#e6e6fa";
+                h.spawn(e.x, e.y, finalDmg, hitmarkColor, isCrit);
                 this.hitEnemies.add(e);
+
+                if (this.isExtendedSword && !this.hitEnemiesForExtension.has(e)) {
+                    this.hitEnemiesForExtension.add(e);
+                    
+                    let newTarget = null;
+                    let minDistance = Infinity;
+                    enemies.active.forEach(enemy => {
+                        if (enemy !== e && !this.hitEnemies.has(enemy)) {
+                            const distance = Math.hypot(enemy.x - e.x, enemy.y - e.y);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                newTarget = enemy;
+                            }
+                        }
+                    });
+
+                    if (newTarget) {
+                        const extensionAngle = Math.atan2(newTarget.y - e.y, newTarget.x - e.y);
+                        const extensionEffect = staticEffects.spawn();
+                        extensionEffect.spawn(e.x, e.y, this.width * 0.7, this.height * 0.7, extensionAngle, this.damage * 0.75, 0.25, renderExtendedSwordSlash, true);
+                    }
+                }
             }
         }
     }
@@ -1059,11 +1213,13 @@ class DemonicSigilEffect {
         this.slowFactor = 0.5;
     }
 
-    spawn(x, y, radius, damage) {
+    spawn(x, y, radius, damage, drawingDuration, activeDuration) {
         this.x = x;
         this.y = y;
         this.radius = radius;
         this.damage = damage;
+        this.drawingDuration = drawingDuration;
+        this.activeDuration = activeDuration;
         this.active = true;
         this.elapsed = 0;
         this.state = 'drawing';
@@ -1092,10 +1248,10 @@ class DemonicSigilEffect {
                     if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
                         const finalDmg = Math.max(1, this.damage - e.armor);
                         e.hp -= finalDmg;
-                        e.slowFactor = this.slowFactor;
-                        e.slowTimer = 0.3;
                         const h = hitmarks.spawn();
                         h.spawn(e.x, e.y, finalDmg, "#ff4500");
+                        e.slowFactor = this.slowFactor;
+                        e.slowTimer = 0.3;
                     }
                 }
             }
@@ -1175,62 +1331,172 @@ class DemonicSigilEffect {
 }
 const demonicSigils = new Pool(() => new DemonicSigilEffect(), 10);
 
-class ThunderstormAOE {
+class DemonicRealmEffect {
     constructor() {
         this.active = false;
         this.x = 0;
         this.y = 0;
-        this.radius = 60; // Reduced base radius
+        this.radius = 1;
         this.damage = 0;
-        this.duration = 0.4; // Slightly shorter duration
+        this.drawingDuration = 8;
+        this.activeDuration = 2;
         this.elapsed = 0;
-        this.hitEnemies = new Set();
+        this.state = 'drawing';
+        this.lastDmgTime = 0;
+        this.rotation = 0;
     }
 
-    spawn(x, y, damage, area) {
+    spawn(x, y, radius, damage, drawingDuration, activeDuration) {
         this.x = x;
         this.y = y;
+        this.radius = radius;
         this.damage = damage;
-        this.radius *= Math.sqrt(area);
+        this.drawingDuration = drawingDuration;
+        this.activeDuration = activeDuration;
         this.active = true;
         this.elapsed = 0;
-        this.hitEnemies.clear();
+        this.state = 'drawing';
+        this.lastDmgTime = 0;
+        this.rotation = 0;
     }
 
     update(dt) {
         if (!this.active) return;
         this.elapsed += dt;
-        if (this.elapsed >= this.duration) {
-            this.active = false;
-            thunderstormCircles.recycle(this);
-            return;
+
+        if (this.state === 'drawing' && this.elapsed >= this.drawingDuration) {
+            this.state = 'active';
+            this.elapsed = 0;
         }
 
-        for (const e of enemies.active) {
-            if (!this.hitEnemies.has(e) && Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
-                const finalDmg = Math.max(1, this.damage - e.armor);
-                e.hp -= finalDmg;
-                const h = hitmarks.spawn();
-                h.spawn(e.x, e.y, finalDmg, "#87ceeb");
-                this.hitEnemies.add(e);
+        if (this.state === 'active') {
+            if (this.elapsed >= this.activeDuration) {
+                this.active = false;
+                demonicRealms.recycle(this);
+                return;
+            }
+            
+            const progress = this.elapsed / this.activeDuration;
+            const spinSpeed = Math.sin(progress * Math.PI); 
+            this.rotation += spinSpeed * 5 * dt;
+
+            const pullStrength = 1 + (player.stats.Curse / 100);
+
+            // Pull logic runs every frame for enemies in range.
+            for (const e of enemies.active) {
+                const dx = this.x - e.x;
+                const dy = this.y - e.y;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist < this.radius + e.r && dist > 0 && !EnemyTypes[e.type].isBoss) {
+                    e.x += (dx / dist) * 60 * pullStrength * dt;
+                    e.y += (dy / dist) * 60 * pullStrength * dt;
+                }
+            }
+
+            // Damage logic is throttled to run every 0.2 seconds.
+            if (gameTime - this.lastDmgTime > 0.2) {
+                this.lastDmgTime = gameTime;
+                for (const e of enemies.active) {
+                    if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
+                        const hpBefore = e.hp;
+                        const finalDmg = Math.max(1, this.damage - e.armor);
+                        e.hp -= finalDmg;
+                        const h = hitmarks.spawn();
+                        h.spawn(e.x, e.y, finalDmg, `hsl(${gameTime * 100 % 360}, 100%, 50%)`);
+                        
+                        if (hpBefore > 0 && e.hp <= 0) {
+                            dropXP(e.x, e.y, EnemyTypes[e.type].xpValue * 2);
+                            e.xpDropped = true;
+                        }
+                    }
+                }
             }
         }
     }
 
     render() {
         if (!this.active) return;
-        const progress = this.elapsed / this.duration;
-        const alpha = Math.sin(progress * Math.PI) * 0.5; // More transparent
         ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = "rgba(173, 216, 230, 0.3)"; // Lighter, more transparent blue
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius * progress, 0, Math.PI * 2); // Grow effect
-        ctx.fill();
+        
+        if (this.state === 'drawing') {
+            const progress = Math.min(1, this.elapsed / this.drawingDuration);
+            this.renderPentagram(progress, '#fff', '#fff');
+        } else {
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.rotation);
+            ctx.translate(-this.x, -this.y);
+            const rainbowColor = `hsl(${this.elapsed * 100 % 360}, 100%, 50%)`;
+            this.renderPentagram(1, rainbowColor, rainbowColor, true);
+        }
+
         ctx.restore();
     }
+
+    renderPentagram(progress, strokeColor, shadowColor, useGradient = false) {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 4;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = shadowColor;
+        
+        if (useGradient) {
+            const gradient = ctx.createConicGradient(this.rotation, this.x, this.y);
+            for(let i = 0; i <= 360; i += 60) {
+                gradient.addColorStop(i / 360, `hsl(${(this.elapsed * 100 + i) % 360}, 100%, 50%)`);
+            }
+            ctx.strokeStyle = gradient;
+        }
+
+
+        const totalLength = (Math.PI * 2 * this.radius) + (5 * this.radius * 2 * Math.sin(Math.PI / 5) / Math.sin(2 * Math.PI / 5)) * 2;
+        const circleLength = Math.PI * 2 * this.radius;
+        const circleProgress = Math.min(1, progress * (totalLength / circleLength));
+        
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, -Math.PI / 2, -Math.PI / 2 + circleProgress * Math.PI * 2);
+        ctx.stroke();
+
+        const pentagramProgress = Math.max(0, (progress * totalLength - circleLength) / (totalLength - circleLength));
+        if (pentagramProgress > 0) {
+            ctx.beginPath();
+            const points = [];
+            for (let i = 0; i < 5; i++) {
+                points.push({
+                    x: this.x + this.radius * Math.cos(-Math.PI / 2 + i * 2 * Math.PI / 5),
+                    y: this.y + this.radius * Math.sin(-Math.PI / 2 + i * 2 * Math.PI / 5)
+                });
+            }
+            
+            const lines = [[0, 2], [2, 4], [4, 1], [1, 3], [3, 0]];
+            const totalPentagramLength = lines.reduce((acc, line) => {
+                const p1 = points[line[0]];
+                const p2 = points[line[1]];
+                return acc + Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            }, 0);
+
+            let drawnLength = 0;
+            let lengthToDraw = pentagramProgress * totalPentagramLength;
+
+            for (const line of lines) {
+                if (drawnLength >= lengthToDraw) break;
+                const p1 = points[line[0]];
+                const p2 = points[line[1]];
+                const segmentLength = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                
+                ctx.moveTo(p1.x, p1.y);
+                if (drawnLength + segmentLength <= lengthToDraw) {
+                    ctx.lineTo(p2.x, p2.y);
+                } else {
+                    const ratio = (lengthToDraw - drawnLength) / segmentLength;
+                    ctx.lineTo(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio);
+                }
+                drawnLength += segmentLength;
+            }
+            ctx.stroke();
+        }
+    }
 }
-const thunderstormCircles = new Pool(() => new ThunderstormAOE(), 50);
+const demonicRealms = new Pool(() => new DemonicRealmEffect(), 5);
  
 // ------------------- Weapon class (with baseCooldown, level + level table, pierce) ------------------- 
 class Weapon{ 
@@ -1355,133 +1621,6 @@ function wandFire(playerRef, slotIndex) {
   // ====== Apply cooldown (stat-modified) ====== 
   w.cooldownTimer = w.baseCooldown * cooldownMult; 
 } 
-function extendedSwordFire(playerRef, slotIndex) {
-    const w = this;
-    const amount = 2 + Math.floor(playerRef.stats["Amount"] || 0); // Evolved has more slashes
-    const area = (w.baseArea || 1.2) * (1 + (playerRef.stats.Area || 0) / 100);
-    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
-    const duration = 0.25;
-    const slashDelay = 120;
-
-    const sortedEnemies = [...enemies.active].sort((a, b) =>
-        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) -
-        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
-    );
-
-    const baseAngle = sortedEnemies.length > 0 ? Math.atan2(sortedEnemies[0].y - playerRef.y, sortedEnemies[0].x - playerRef.x) : playerRef.angle;
-
-    for (let i = 0; i < amount; i++) {
-        setTimeout(() => {
-            const angle = baseAngle + (i % 2 === 1 ? Math.PI : 0) + (Math.random() - 0.5) * 0.2;
-            const spawnDist = 45;
-            const x = playerRef.x + Math.cos(angle) * spawnDist;
-            const y = playerRef.y + Math.sin(angle) * spawnDist;
-
-            const critChance = (playerRef.stats.Luck || 0) / 100;
-            const isCrit = Math.random() < critChance;
-            const finalDamage = isCrit ? damage * 2 : damage;
-            
-            const effect = staticEffects.spawn();
-            effect.spawn(x, y, 110 * area, 35 * area, angle, finalDamage, duration, (eff) => {
-                renderSwordSlash(eff); // Reuse basic slash render
-                if (isCrit) {
-                     // Could add a special crit visual here
-                }
-            });
-        }, i * slashDelay);
-    }
-}
-
-function healingNovaFire(playerRef, slotIndex) {
-    const w = this;
-    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
-    const areaBonus = 1.25 * (1 + (playerRef.stats["Area"] || 0) / 100); // Larger base area
-    const mightBonus = 1 + (playerRef.stats["Might"] || 0) / 100;
-    const pulseDelay = 200;
-
-    for (let i = 0; i < amount; i++) {
-        setTimeout(() => {
-            novaPulses.push({
-                x: playerRef.x,
-                y: playerRef.y,
-                radius: 0,
-                maxRadius: 100 * areaBonus,
-                damage: w.baseDamage * mightBonus,
-                life: 0.5,
-                hitEnemies: new Set(),
-                isHealing: true,
-                healAmount: (playerRef.stats.Recovery || 0) / 2
-            });
-        }, i * pulseDelay);
-    }
-}
-
-function vulcanFire(playerRef, slotIndex) {
-    const w = this;
-    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
-    const speed = w.speed * (1 + (playerRef.stats.Speed || 0) / 100);
-    const duration = w.duration * (1 + (playerRef.stats.Duration || 0) / 100);
-    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
-    const area = 1 * (1 + (playerRef.stats.Area || 0) / 100);
-
-    const availableEnemies = [...enemies.active]; // Target all, including bosses
-
-    for (let i = 0; i < amount; i++) {
-        if (availableEnemies.length > 0) {
-            const target = availableEnemies[Math.floor(Math.random() * availableEnemies.length)];
-            const angle = Math.atan2(target.y - playerRef.y, target.x - playerRef.x);
-            
-            const p = fireballs.spawn();
-            p.spawn(playerRef.x, playerRef.y, angle, speed, duration, damage);
-            p.isVulcan = true; // Add a flag for special logic
-        }
-    }
-}
-
-function crucifixFire(playerRef, slotIndex) {
-    const w = this;
-    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
-    const area = 1 + (playerRef.stats["Area"] || 0) / 100;
-    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
-    
-    // Armor penetration: 10% per point of armor, max 100%
-    const armorPen = Math.min(1, (playerRef.stats.Armor || 0) * 0.1);
-
-    const sortedEnemies = [...enemies.active].sort((a, b) => 
-        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) - 
-        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
-    );
-
-    for (let i = 0; i < amount; i++) {
-        const target = sortedEnemies[i] || { x: playerRef.x + 1, y: playerRef.y };
-        const angle = Math.atan2(target.y - playerRef.y, target.x - playerRef.x);
-        const p = crucifixProjectiles.spawn();
-        p.spawn(playerRef.x, playerRef.y, angle, damage, area, armorPen);
-    }
-}
-
-function thunderstormFire(playerRef, slotIndex) {
-    const w = this;
-    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
-    const area = 1 + (playerRef.stats["Area"] || 0) / 100;
-
-    for (let i = 0; i < amount; i++) {
-        if (enemies.active.length > 0) {
-            const target = enemies.active[Math.floor(Math.random() * enemies.active.length)];
-            const mightBonus = 1 + (playerRef.stats["Might"] || 0) / 100;
-            const damage = w.baseDamage * mightBonus;
-
-            thunderbolts.push({
-                x: target.x,
-                y: target.y,
-                damage: damage,
-                timer: 0.3,
-                isThunderstorm: true,
-                area: area
-            });
-        }
-    }
-}
  
  
  
@@ -1676,67 +1815,71 @@ holy_wand: new Weapon({
     isEvolved: true,
     desc: "Fires a rapid sequence of projectiles. Never stops firing."
 }),
-thunderstorm: new Weapon({
-    id: "thunderstorm",
-    name: "Thunderstorm",
-    icon: "⛈️",
-    baseCooldown: 1.8,
-    baseDamage: 20,
-    fireFunc: thunderstormFire,
+demonic_realm: new Weapon({
+    id: "demonic_realm",
+    name: "Demonic Realm",
+    icon: "🔯",
+    baseCooldown: 22.5, // 30 * 0.75
+    baseDamage: 187.5, // 150 * 1.25
+    baseDuration: 1.75, // 1.4 * 1.25
+    fireFunc: demonicRealmFire,
     level: 1,
     maxLevel: 1,
     isEvolved: true,
-    desc: "Calls down powerful lightning strikes that create a damaging AOE."
-}),
-crucifix: new Weapon({
-    id: "crucifix",
-    name: "Crucifix",
-    icon: "🌟",
-    baseCooldown: 2.0,
-    baseDamage: 15,
-    fireFunc: crucifixFire,
-    level: 1,
-    maxLevel: 1,
-    isEvolved: true,
-    desc: "A powerful, homing cross that ricochets and penetrates armor."
-}),
-extended_sword: new Weapon({
-    id: "extended_sword",
-    name: "Extended Sword",
-    icon: "🗡️",
-    baseCooldown: 1.6,
-    baseDamage: 22,
-    fireFunc: extendedSwordFire,
-    level: 1,
-    maxLevel: 1,
-    isEvolved: true,
-    desc: "A faster, stronger sword with a chance for critical hits."
-}),
-healing_nova: new Weapon({
-    id: "healing_nova",
-    name: "Healing Nova",
-    icon: "💖",
-    baseCooldown: 2.5,
-    baseDamage: 12,
-    fireFunc: healingNovaFire,
-    level: 1,
-    maxLevel: 1,
-    isEvolved: true,
-    desc: "A larger, multi-pulse nova that heals the player for each enemy hit."
+    desc: "A spinning vortex of souls that pulls enemies in. Killed enemies drop double XP."
 }),
 vulcan: new Weapon({
     id: "vulcan",
     name: "Vulcan",
     icon: "🌋",
-    baseCooldown: 1.8,
-    baseDamage: 20,
-    speed: 200,
-    duration: 1.8,
+    baseCooldown: 2.0,
+    baseDamage: 170, // 85 * 2
+    speed: 180 * 1.2 * 1.2 * 1.2,
+    duration: 1.5,
     fireFunc: vulcanFire,
     level: 1,
     maxLevel: 1,
     isEvolved: true,
-    desc: "A powerful fire wand that pierces slain enemies and devastates bosses."
+    desc: "Launches massive fireballs that pierce slain enemies and deal double damage to bosses."
+}),
+magnetic_field: new Weapon({
+    id: "magnetic_field",
+    name: "Magnetic Field",
+    icon: "🧲",
+    baseCooldown: 2.5,
+    baseDamage: 41.25, // 33 * 1.25
+    duration: 4.65, // 3.1 * 1.5
+    amount: 4,
+    fireFunc: magneticFieldFire,
+    level: 1,
+    maxLevel: 1,
+    isEvolved: true,
+    desc: "Creates homing zones of energy that chase the nearest enemy."
+}),
+extended_sword: new Weapon({
+    id: "extended_sword",
+    name: "Extended Sword",
+    icon: "🗡️",
+    baseCooldown: 1.8,
+    baseDamage: 55, // 50 * 1.1
+    fireFunc: extendedSwordFire,
+    level: 1,
+    maxLevel: 1,
+    isEvolved: true,
+    desc: "Slashes enemies and creates seeking extensions. Has a chance to critically strike."
+}),
+healing_nova: new Weapon({
+    id: "healing_nova",
+    name: "Healing Nova",
+    icon: "💖",
+    baseCooldown: 3.0,
+    baseDamage: 40,
+    baseArea: 1.25,
+    fireFunc: healingNovaFire,
+    level: 1,
+    maxLevel: 1,
+    isEvolved: true,
+    desc: "Emits multiple healing pulses that damage enemies and restore health on hit."
 })
 };
 
@@ -1745,13 +1888,17 @@ const evolutionRecipes = {
         passive: "arcane_sphere",
         evolvedId: "holy_wand"
     },
-    "thunderbolt": {
-        passive: "mirror_sigil",
-        evolvedId: "thunderstorm"
+    "demonic_sigil": {
+        passive: "cursed_skull",
+        evolvedId: "demonic_realm"
     },
-    "cross": {
-        passive: "iron_plate",
-        evolvedId: "crucifix"
+    "fire_wand": {
+        passive: "power_crystal",
+        evolvedId: "vulcan"
+    },
+    "hallowed_ground": {
+        passive: "magnet_core",
+        evolvedId: "magnetic_field"
     },
     "sword": {
         passive: "four_leaf",
@@ -1760,10 +1907,6 @@ const evolutionRecipes = {
     "nova_pulse": {
         passive: "healing_balm",
         evolvedId: "healing_nova"
-    },
-    "fire_wand": {
-        passive: "power_crystal",
-        evolvedId: "vulcan"
     }
 };
 
@@ -1774,6 +1917,30 @@ for (const baseId in evolutionRecipes) {
 
 let thunderbolts = [];
 let novaPulses = [];
+
+function healingNovaFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+    const areaBonus = (w.baseArea || 1) * (1 + (playerRef.stats["Area"] || 0) / 100);
+    const mightBonus = 1 + (playerRef.stats["Might"] || 0) / 100;
+    const pulseDelay = 200; // ms delay between pulses
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            if (paused || dead) return;
+            novaPulses.push({
+                x: playerRef.x,
+                y: playerRef.y,
+                radius: 0,
+                maxRadius: 100 * areaBonus,
+                damage: w.baseDamage * mightBonus,
+                life: 0.5,
+                hitEnemies: new Set(),
+                heals: true
+            });
+        }, i * pulseDelay);
+    }
+}
 
 function holyWandFire(playerRef, slotIndex) {
     const w = this;
@@ -1819,9 +1986,62 @@ function demonicSigilFire(playerRef, slotIndex) {
     const mightBonus = 1 + (playerRef.stats.Might / 100);
     const curseBonus = 1 + (playerRef.stats.Curse / 100);
     const damage = w.baseDamage * mightBonus * curseBonus;
-    
+
+    const speedBonus = 1 + (playerRef.stats.Speed / 100);
+    const durationBonus = 1 + (playerRef.stats.Duration / 100);
+
+    const baseDrawingDuration = 10;
+    const baseActiveDuration = 1.4;
+
+    const finalDrawingDuration = baseDrawingDuration / speedBonus;
+    const finalActiveDuration = baseActiveDuration * durationBonus;
+
     const sigil = demonicSigils.spawn();
-    sigil.spawn(playerRef.x, playerRef.y, 150 * area, damage);
+    sigil.spawn(playerRef.x, playerRef.y, 150 * area, damage, finalDrawingDuration, finalActiveDuration);
+}
+
+function demonicRealmFire(playerRef, slotIndex) {
+    const w = this;
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+    const mightBonus = 1 + (playerRef.stats.Might / 100);
+    const curseBonus = 1 + (playerRef.stats.Curse / 100);
+    const damage = w.baseDamage * mightBonus * curseBonus;
+    const speedBonus = 1 + (playerRef.stats.Speed / 100);
+    const durationBonus = 1 + (playerRef.stats.Duration / 100);
+
+    const baseDrawingDuration = 8;
+    const baseActiveDuration = w.baseDuration || 1;
+
+    const finalDrawingDuration = baseDrawingDuration / speedBonus;
+    const finalActiveDuration = baseActiveDuration * durationBonus;
+
+    const realm = demonicRealms.spawn();
+    realm.spawn(playerRef.x, playerRef.y, 180 * area, damage, finalDrawingDuration, finalActiveDuration);
+}
+
+function vulcanFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 1 + Math.floor(playerRef.stats["Amount"] || 0);
+    const speed = w.speed * (1 + (playerRef.stats.Speed || 0) / 100);
+    const duration = w.duration * (1 + (playerRef.stats.Duration || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const area = 1 * (1 + (playerRef.stats.Area || 0) / 100);
+
+    const availableEnemies = enemies.active.filter(e => !EnemyTypes[e.type].isBoss);
+    if (availableEnemies.length > 0) {
+        const target = availableEnemies[Math.floor(Math.random() * availableEnemies.length)];
+        const angleToTarget = Math.atan2(target.y - playerRef.y, target.x - playerRef.x);
+
+        const arcSpread = Math.PI / 4 * area;
+        const angleStep = amount > 1 ? arcSpread / (amount - 1) : 0;
+        const startAngle = angleToTarget - arcSpread / 2;
+
+        for (let i = 0; i < amount; i++) {
+            const angle = startAngle + i * angleStep;
+            const p = vulcanProjectiles.spawn();
+            p.spawn(playerRef.x, playerRef.y, angle, speed, duration, damage);
+        }
+    }
 }
 
 function renderSwordSlash(effect) {
@@ -1846,6 +2066,65 @@ function renderSwordSlash(effect) {
     ctx.strokeRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
 
     ctx.restore();
+}
+
+function renderExtendedSwordSlash(effect) {
+    const progress = effect.elapsed / effect.duration;
+    const alpha = Math.sin(progress * Math.PI);
+
+    ctx.save();
+    ctx.translate(effect.x, effect.y);
+    ctx.rotate(effect.angle);
+    ctx.globalAlpha = alpha;
+
+    const grad = ctx.createLinearGradient(-effect.width / 2, 0, effect.width / 2, 0);
+    grad.addColorStop(0, "rgba(255, 220, 180, 0)");
+    grad.addColorStop(0.5, "rgba(255, 255, 255, 1)");
+    grad.addColorStop(1, "rgba(255, 220, 180, 0)");
+    
+    ctx.fillStyle = grad;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = 'gold';
+    ctx.fillRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+    
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+
+    ctx.restore();
+}
+
+function extendedSwordFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = 2 + Math.floor(playerRef.stats["Amount"] || 0);
+    const area = 1.1 * (1 + (playerRef.stats.Area || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const duration = 0.25;
+    const slashDelay = 150;
+
+    const sortedEnemies = [...enemies.active].sort((a, b) =>
+        Math.hypot(a.x - playerRef.x, a.y - playerRef.y) -
+        Math.hypot(b.x - playerRef.x, b.y - playerRef.y)
+    );
+
+    const target = sortedEnemies[0] || null;
+    const baseAngle = target ? Math.atan2(target.y - playerRef.y, target.x - playerRef.x) : playerRef.angle;
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            const angle = baseAngle + (i % 2 === 1 ? Math.PI : 0);
+            const spawnDist = 40;
+            const x = playerRef.x + Math.cos(angle) * spawnDist;
+            const y = playerRef.y + Math.sin(angle) * spawnDist;
+
+            const slashWidth = 110 * area;
+            const slashHeight = 35 * area;
+
+            const effect = staticEffects.spawn();
+            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderExtendedSwordSlash, true);
+            effect.isExtendedSword = true;
+        }, i * slashDelay);
+    }
 }
 
 function swordFire(playerRef, slotIndex) {
@@ -1875,7 +2154,7 @@ function swordFire(playerRef, slotIndex) {
             const slashHeight = 30 * area;
 
             const effect = staticEffects.spawn();
-            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderSwordSlash);
+            effect.spawn(x, y, slashWidth, slashHeight, angle, damage, duration, renderSwordSlash, false);
         }, i * slashDelay);
     }
 }
@@ -1961,6 +2240,27 @@ function hallowedGroundFire(playerRef, slotIndex) {
             y = playerRef.y + Math.sin(w.lastAngle) * currentDist;
         }
         zone.spawn(x, y, 50 * area, damage, duration);
+    }
+}
+
+function magneticFieldFire(playerRef, slotIndex) {
+    const w = this;
+    const amount = (w.amount || 1) + Math.floor(playerRef.stats["Amount"] || 0);
+    const area = (w.baseArea || 1) * (1 + (playerRef.stats.Area || 0) / 100);
+    const duration = w.duration * (1 + (playerRef.stats.Duration || 0) / 100);
+    const damage = w.baseDamage * (1 + (playerRef.stats.Might || 0) / 100);
+    const projectileDelay = 150; // ms delay
+
+    for (let i = 0; i < amount; i++) {
+        setTimeout(() => {
+            if (paused || dead) return;
+            const zone = damagingZones.spawn();
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * 100 + 50;
+            const x = playerRef.x + Math.cos(angle) * dist;
+            const y = playerRef.y + Math.sin(angle) * dist;
+            zone.spawn(x, y, 60 * area, damage, duration, true);
+        }, i * projectileDelay);
     }
 }
 // Function to clone a catalog weapon when giving it to player (to keep catalog intact) 
@@ -2181,9 +2481,14 @@ const levelUpController = {
   }, 
  
   onLevelUp(){ 
-    const choices = this.pickChoices(); 
-    if(choices.length === 0) return; 
-    this.showChoices(choices); 
+    if (player.pendingLevelUps > 0) {
+        const choices = this.pickChoices();
+        if(choices.length === 0) {
+            player.pendingLevelUps = 0; // No more upgrades, clear pending
+            return;
+        }
+        this.showChoices(choices);
+    }
   }, 
  
   showChoices(choices){ 
@@ -2238,15 +2543,20 @@ const levelUpController = {
     } 
   }, 
  
-  hideChoices(){ 
-    this.showing=false; 
-    const el=document.getElementById("levelUpScreen"); 
-    el.style.display="none"; el.setAttribute("aria-hidden","true"); 
-    paused=false; 
-    updatePassiveSlotsUI(); updateInventoryUI(); 
-  }, 
+  hideChoices(){
+    if (player.pendingLevelUps > 0) {
+        this.onLevelUp();
+    } else {
+        this.showing=false;
+        const el=document.getElementById("levelUpScreen");
+        el.style.display="none"; el.setAttribute("aria-hidden","true");
+        paused=false;
+        updatePassiveSlotsUI(); updateInventoryUI();
+    }
+  },
  
   applyChoice(choice){ 
+    player.pendingLevelUps--;
     if(choice.kind === "passive"){ 
       const p = passiveMap[choice.data.id]; if(!p) return; 
       const lvl = player.passiveLevels[p.id]||0; 
@@ -2333,6 +2643,7 @@ const chestController = {
         this.isOpening = true;
         paused = true;
         this.rewards = this.determineRewards();
+        this.rewardsDisplayed = false;
         
         document.getElementById('chestScreen').style.display = 'flex';
         document.getElementById('skipChestBtn').style.display = 'block';
@@ -2365,8 +2676,28 @@ const chestController = {
         if (Math.random() * luck > 2.5) numRewards = 5;
 
         const upgradeableWeapons = player.weaponSlots.filter(w => w && w.level < w.maxLevel);
-        const upgradeablePassives = player.passiveSlots.filter(p => p && player.passiveLevels[p] < passiveMap[p].maxLevel);
-        const possibleUpgrades = [...upgradeableWeapons, ...upgradeablePassives.map(p => passiveMap[p])];
+        
+        const possibleUpgrades = [...upgradeableWeapons];
+        const ownedPassiveIds = new Set();
+
+        // Add owned, upgradeable passives
+        player.passiveSlots.forEach(id => {
+            if (id) {
+                ownedPassiveIds.add(id);
+                if ((player.passiveLevels[id] || 0) < passiveMap[id].maxLevel) {
+                    possibleUpgrades.push(passiveMap[id]);
+                }
+            }
+        });
+
+        // Add new passives if there's a free slot
+        if (ownedPassiveIds.size < player.passiveSlots.length) {
+            passiveItems.forEach(item => {
+                if (!ownedPassiveIds.has(item.id)) {
+                    possibleUpgrades.push(item);
+                }
+            });
+        }
 
         let rewards = [];
         for (let i = 0; i < numRewards; i++) {
@@ -2434,18 +2765,23 @@ const chestController = {
 
         const { interval, spinner, shuffledIcons, reel } = this.animationIntervals[index];
         clearInterval(interval);
-        
+
         const reward = this.rewards[index];
-        let rewardIcon = '💰';
-        if (reward.id) {
+        let rewardIcon = '💰'; // Default for coin bags
+        if (reward.type === 'evolution') {
+            rewardIcon = weaponsCatalog[reward.recipe.evolvedId].icon;
+        } else if (reward.type === 'chest_coin_bag') {
+            rewardIcon = '💰';
+        } else if (reward.id) { // This covers weapons and passives
             rewardIcon = reward.icon;
         }
 
         const iconIndex = shuffledIcons.indexOf(rewardIcon);
-        const finalPos = -iconIndex * 100;
-
-        spinner.style.transition = 'top 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
-        spinner.style.top = `${finalPos}px`;
+        if (iconIndex > -1) {
+            const finalPos = -iconIndex * 100;
+            spinner.style.transition = 'top 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
+            spinner.style.top = `${finalPos}px`;
+        }
         
         this.animationIntervals[index] = null;
     },
@@ -2454,20 +2790,25 @@ const chestController = {
         this.animationIntervals.forEach((anim, i) => {
             if (anim) {
                 clearInterval(anim.interval);
-                if (skipped) {
-                    this.stopReel(i);
-                }
+                // Always call stopReel, even if not skipped, to ensure final state is set.
+                this.stopReel(i);
             }
         });
         this.animationIntervals = [];
 
         document.getElementById('skipChestBtn').style.display = 'none';
-        document.getElementById('closeChestBtn').style.display = 'block';
         
-        setTimeout(() => this.displayRewards(), skipped ? 0 : 500);
+        // Use a consistent delay to prevent race conditions and allow animation to finish.
+        setTimeout(() => {
+            this.displayRewards();
+            document.getElementById('closeChestBtn').style.display = 'block';
+        }, 600);
     },
 
     displayRewards() {
+        if (this.rewardsDisplayed) return; // Prevent this from running multiple times
+        this.rewardsDisplayed = true;
+
         const rewardsContainer = document.getElementById('chestRewards');
         rewardsContainer.innerHTML = '';
         for (const reward of this.rewards) {
@@ -2498,8 +2839,18 @@ const chestController = {
                     icon.textContent = weapon.icon;
                     title.textContent = `${weapon.name} LV ${weapon.level}`;
                 } else { // Passive
-                    player.passiveLevels[reward.id]++;
-                    levelUpController.applyStat(reward.stat, reward.value);
+                    const currentLevel = player.passiveLevels[reward.id] || 0;
+                    if (currentLevel > 0) { // Upgrade existing passive
+                        player.passiveLevels[reward.id]++;
+                        levelUpController.applyStat(reward.stat, reward.value);
+                    } else { // Add new passive
+                        const freeSlot = player.passiveSlots.findIndex(s => !s);
+                        if (freeSlot !== -1) {
+                            player.passiveSlots[freeSlot] = reward.id;
+                            player.passiveLevels[reward.id] = 1;
+                            levelUpController.applyStat(reward.stat, reward.value);
+                        }
+                    }
                     icon.textContent = reward.icon;
                     title.textContent = `${reward.name} LV ${player.passiveLevels[reward.id]}`;
                 }
@@ -2642,201 +2993,139 @@ function weaponNextLevelDescription(inst){
 function randPickAndRemove(arr){ const idx = Math.floor(Math.random()*arr.length); return arr.splice(idx,1)[0]; } 
 function shuffleArray(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; } 
 // ------------------- Enemy types & enemy pool ------------------- 
-const EnemyTypes={ 
-    // 1-3 min
-    goblin:   { hp: 12,  dmg: 8,  armor: 1, speed: 80,  size: 12, xpValue: 2,  color: '#8fbc8f' },
-    bat:      { hp: 8,   dmg: 6,  armor: 0, speed: 120, size: 8,  xpValue: 1.5,color: '#a9a9a9' },
-    // 3-5 min
-    skeleton: { hp: 25,  dmg: 10, armor: 2, speed: 70,  size: 14, xpValue: 4,  color: '#f5f5dc' },
-    sprinter: { hp: 15,  dmg: 8,  armor: 0, speed: 180, size: 10, xpValue: 3,  color: '#add8e6' },
-    // 5-8 min
-    orc:      { hp: 40,  dmg: 12, armor: 3, speed: 60,  size: 18, xpValue: 5,  color: '#d2691e' },
-    ghoul:    { hp: 30,  dmg: 10, armor: 1, speed: 90,  size: 13, xpValue: 4,  color: '#556b2f', isHorde: true },
-    // 8-10 min
-    tank:     { hp: 80,  dmg: 10, armor: 5, speed: 30,  size: 22, xpValue: 10, color: '#a52a2a' },
-    // 10-15 min
-    golem:    { hp: 150, dmg: 14, armor: 5, speed: 40,  size: 24, xpValue: 15, color: '#708090' },
-    // Minibosses
-    minotaur: { hp: 250, dmg: 15, armor: 8, speed: 70,  size: 28, xpValue: 100, isBoss: true, color: '#8b4513' }, // Drops a lot of XP but no chest
-    gargoyle: { hp: 180, dmg: 12, armor: 4, speed: 100, size: 20, xpValue: 80, isBoss: true, color: '#663399' },
-    // Bosses
-    ogre_boss: { hp: 500, dmg: 15, armor: 10, speed: 50, size: 32, xpValue: 150, isBoss: true, color: '#dc143c' },
-    lich_boss: { hp: 800, dmg: 18, armor: 5,  speed: 60, size: 30, xpValue: 250, isBoss: true, color: '#9400d3' },
-    doom_knight_boss: { hp: 1500, dmg: 20, armor: 15, speed: 40, size: 38, xpValue: 500, isBoss: true, color: '#4b0082' },
-    guardian:  { hp: 150, dmg: 25, armor: 15, speed: 70, size: 40, xpValue: 200, isBoss: true, color: '#ffd700' } // HP is overridden
+const EnemyTypes={
+    // 0-3 min
+    bat:         {hp:4,  dmg:5,  armor:0, speed:120, size:8,  xpValue:1, color: '#a9a9a9'},
+    goblin:      {hp:8,  dmg:6,  armor:1, speed:80,  size:12, xpValue:1, color: '#8fbc8f'},
+    imp:         {hp:15, dmg:8,  armor:0, speed:100, size:10, xpValue:2, color: '#ff4500'}, // New
+    skeleton:    {hp:20, dmg:10, armor:2, speed:70,  size:14, xpValue:2, color: '#f5f5dc'},
+
+    // 3-8 min
+    sprinter:    {hp:25, dmg:8,  armor:0, speed:180, size:10, xpValue:4, color: '#add8e6'},
+    orc:         {hp:40, dmg:9,  armor:3, speed:60,  size:18, xpValue:4, color: '#d2691e'},
+    banshee:     {hp:50, dmg:12, armor:2, speed:150, size:14, xpValue:5, color: '#e0ffff'},
+    // Miniboss (appears in regular waves)
+    golem:       {hp:170, dmg:12, armor:5, speed:40, size:24, xpValue:50, isMiniboss: true, color: '#708090'},
+
+    // 8-15 min
+    shadow:      {hp:80,  dmg:14, armor:3, speed:110, size:16, xpValue:10, color: '#3c3c3c'}, // New
+    warlock:     {hp:120, dmg:18, armor:5, speed:70,  size:18, xpValue:15, color: '#8a2be2'}, // New
+    // Miniboss
+    gargoyle:    {hp:500, dmg:15, armor:10, speed:30, size:26, xpValue:150, isMiniboss: true, color: '#696969'},
+
+    // 15-25 min
+    behemoth:    {hp:200, dmg:20, armor:8, speed:50,  size:28, xpValue:20, color: '#8b4513'}, // New
+    reaver:      {hp:300, dmg:25, armor:12, speed:80, size:22, xpValue:35, color: '#dc143c'}, // New
+    // Miniboss
+    cyclops:     {hp:2000, dmg:30, armor:15, speed:40, size:35, xpValue:400, isMiniboss: true, color: '#ff8c00'}, // New
+
+    // 25-30+ min
+    abomination: {hp:400, dmg:35, armor:15, speed:60, size:32, xpValue:60, color: '#006400'}, // New
+    
+    // Bosses (Base HP set for their first appearance, scaling will increase it)
+    ogre_boss:   {hp:120,  dmg:15, armor:10, speed:50, size:32, xpValue:100, isBoss: true, color: '#dc143c'},
+    lich:        {hp:600,  dmg:18, armor:5,  speed:50, size:20, xpValue:500, isBoss: true, color: '#9370db'},
+    doomknight:  {hp:2000, dmg:25, armor:15, speed:45, size:40, xpValue:1500, isBoss: true, color: '#4b0082'},
+    guardian:    {hp:150, dmg:20, armor:12, speed:65, size:25, xpValue:1000, isBoss: true, color: '#ffd700'}, // Activation Ring boss
+
+    // Swarm Units
+    ghoul:       {hp:10, dmg:5, armor:0, speed:90, size:12, xpValue:1.5, color: '#556b2f', isHorde: true},
+    spiderling:  {hp:20, dmg:7, armor:0, speed:110, size:8, xpValue:3, color: '#800080', isHorde: true}, // New
+    zombie:      {hp:35, dmg:9, armor:1, speed:60, size:14, xpValue:5, color: '#008080', isHorde: true}, // New
 };
-
-const CHUNK_SIZE = 800;
-const generatedChunks = new Set();
-
-class Obstacle {
+ 
+class Enemy {
     constructor() {
-        this.active = false;
-        this.x = 0;
-        this.y = 0;
-        this.width = 0;
-        this.height = 0;
+        this.init('goblin');
     }
 
-    spawn(x, y, width, height) {
-        this.x = x;
-        this.y = y;
-        this.width = width;
-        this.height = height;
-        this.active = true;
+    init(type) {
+        this.type = type;
+        const t = EnemyTypes[type];
+
+        this.maxhp = t.hp;
+        this.hp = t.hp;
+        this.dmg = t.dmg;
+        this.armor = t.armor;
+        this.baseSpd = t.speed;
+        this.r = t.size;
+        this.isHordeEnemy = t.isHorde || false;
+
+        this.x = 0; this.y = 0;
+        this.hordeVx = 0; this.hordeVy = 0;
+        
+        this.hitFlash = 0;
+        this.slowTimer = 0;
+        this.slowFactor = 1;
+        this.isFrozen = false;
+        this.freezeTimer = 0;
+        this.xpDropped = false;
+
     }
 
-    render() {
-        if (!this.active) return;
-        ctx.fillStyle = '#555';
-        ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
-    }
-}
-
-class ActivationRing {
-    constructor() {
-        this.active = false;
-        this.x = 0;
-        this.y = 0;
-        this.radius = 100;
-        this.activated = false;
-        this.pulse = 0;
+    freeze(duration) {
+        this.isFrozen = true;
+        this.freezeTimer = duration;
     }
 
-    spawn(x, y) {
-        this.x = x;
-        this.y = y;
-        this.active = true;
-        this.activated = false;
+    spawn(px, py) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 400 + Math.random() * 300;
+        this.x = px + Math.cos(ang) * dist;
+        this.y = py + Math.sin(ang) * dist;
+        this.applySpawnScaling();
+    }
+    
+    spawnAsHordeMember(spawnX, spawnY, vx, vy) {
+        const spread = 80;
+        this.x = spawnX + (Math.random() - 0.5) * spread;
+        this.y = spawnY + (Math.random() - 0.5) * spread;
+        this.hordeVx = vx;
+        this.hordeVy = vy;
+        this.applySpawnScaling();
+    }
+
+    applySpawnScaling() {
+        const curse = 1 + (player.stats.Curse / 100);
+        const minute = Math.floor(gameTime / 60);
+        const hpTimeScaling = 1 + minute * 0.02; // Reduced from 0.045
+        const dmgTimeScaling = 1 + minute * 0.01; // Reduced from 0.02
+
+        this.hp = this.maxhp * curse * hpTimeScaling;
+        this.dmg = this.dmg * curse * dmgTimeScaling;
+        
+        if (timeStopEffect.active) {
+            this.freeze(timeStopEffect.timer);
+        }
     }
 
     update(dt) {
-        if (!this.active || this.activated) return;
-        this.pulse = (this.pulse + dt) % 1;
+    if (paused || dead) return;
 
-        if (Math.hypot(player.x - this.x, player.y - this.y) < this.radius) {
-            this.activated = true;
-            const angle = Math.random() * Math.PI * 2;
-            const spawnDist = 300;
-            const spawnX = player.x + Math.cos(angle) * spawnDist;
-            const spawnY = player.y + Math.sin(angle) * spawnDist;
-            
-            const guardian = enemies.spawn();
-            guardian.type = 'guardian';
-            guardian.spawn(spawnX, spawnY); // Spawn first to apply curse/time scaling
-            
-            // Now manually set HP based on player level
-            const baseHp = 150;
-            const hpPerLevel = 15;
-            guardian.hp = baseHp + (hpPerLevel * player.level);
-            guardian.maxhp = guardian.hp; // Also set maxhp
-
-            const h = hitmarks.spawn();
-            h.spawn(this.x, this.y - this.radius, "GUARDIAN AWAKENED", "#ff0", 32);
+    // ----- Death Check -----
+    if (this.hp <= 0) {
+        if (!this.xpDropped) {
+            dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
+            this.xpDropped = true;
         }
-    }
-
-    render() {
-        if (!this.active) return;
-        ctx.save();
-        const alpha = this.activated ? 0.2 : 0.5 + Math.sin(this.pulse * Math.PI * 2) * 0.2;
-        ctx.strokeStyle = this.activated ? 'grey' : `rgba(255, 215, 0, ${alpha})`;
-        ctx.lineWidth = this.activated ? 2 : 5;
-        ctx.shadowBlur = this.activated ? 0 : 15;
-        ctx.shadowColor = 'gold';
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-    }
-}
- 
-class Enemy { 
-  constructor(type = "goblin") { 
-    this.type = type; 
-    const t = EnemyTypes[type]; 
- 
-    // Core stats 
-    this.maxhp = t.hp; 
-    this.hp = t.hp; 
-    this.dmg = t.dmg; 
-    this.armor = t.armor; 
-    this.baseSpd = t.speed; 
-    this.r = t.size; 
- 
-    // Position 
-    this.x = 0; 
-    this.y = 0; 
- 
-    // Hit feedback & debuffs 
-    this.hitFlash = 0;     // visual flash timer (seconds) 
-    this.slowTimer = 0;    // slow duration 
-    this.slowFactor = 1;   // movement multiplier 
-    this.isFrozen = false;
-    this.freezeTimer = 0;
-    this.isHordeMember = false;
-    this.hordeTargetX = 0;
-    this.hordeTargetY = 0;
-  } 
- 
-  freeze(duration) {
-      this.isFrozen = true;
-      this.freezeTimer = duration;
-  }
-
-  spawn(px, py) { 
-    this.x = px;
-    this.y = py;
- 
-    const curse = 1 + (player.stats.Curse / 100);
-    const minute = Math.floor(gameTime / 60);
-    const hpTimeScaling = 1 + minute * 0.25; // +25% HP per minute
-
-    this.hp = this.maxhp * curse * hpTimeScaling * (EnemyTypes[this.type].isBoss ? 10 : 1);
-    this.dmg = this.dmg * curse;
-    this.hitFlash = 0; 
-    this.slowTimer = 0; 
-    this.slowFactor = 1;
-    this.isOrbiting = false;
-    this.isPullingToOrbit = false;
-    this.orbitTrail = [];
-  } 
- 
-  update(dt) { 
-    // ----- Death ----- 
-    if (this.hp <= 0) { 
-      dropXP(this.x, this.y, EnemyTypes[this.type].xpValue);
-      const luck = 1 + (player.stats.Luck / 100);
-      if (Math.random() < 0.01 * luck) {
-        const p = pickups.spawn();
-        p.spawn(this.x, this.y, 'coin');
-      }
-      if (EnemyTypes[this.type].isBoss) {
-        const p = pickups.spawn();
-        p.spawn(this.x, this.y, 'chest');
-      }
-      player.kills++;
-      enemies.recycle(this); 
-      return; // Exit early if dead
-    } 
-
-    if (paused || dead) return; 
-
-    if (this.isHordeMember) {
-        const dx = this.hordeTargetX - this.x;
-        const dy = this.hordeTargetY - this.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        this.x += (dx / dist) * this.baseSpd * dt;
-        this.y += (dy / dist) * this.baseSpd * dt;
-
-        if (dist < 20) {
-             enemies.recycle(this); // Despawn when target is reached
+        const luck = 1 + (player.stats.Luck / 100);
+        if (Math.random() < 0.01 * luck) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'coin');
         }
-        // Horde members ignore player collision and separation
+        if (EnemyTypes[this.type].isBoss) {
+            const p = pickups.spawn();
+            p.spawn(this.x, this.y, 'chest');
+        }
+        player.kills++;
+        enemies.recycle(this);
         return;
+    }
+    
+    // ----- Visuals & Timers -----
+    if (this.hitFlash > 0) {
+        this.hitFlash -= dt;
+        if (this.hitFlash < 0) this.hitFlash = 0;
     }
 
     if (this.isFrozen) {
@@ -2844,115 +3133,63 @@ class Enemy {
         if (this.freezeTimer <= 0) {
             this.isFrozen = false;
         }
-        return;
     }
-
-    if (this.isPullingToOrbit) {
-        this.pullToOrbitTimer -= dt;
-        const targetX = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-        const targetY = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
-        this.x += (targetX - this.x) * 0.1;
-        this.y += (targetY - this.y) * 0.1;
-
-        if (this.pullToOrbitTimer <= 0) {
-            this.isPullingToOrbit = false;
-            this.isOrbiting = true;
+    
+    // ----- Movement & Collision (only if not frozen) -----
+    if (!this.isFrozen) {
+        if (this.slowTimer > 0) {
+            this.slowTimer -= dt;
+            if (this.slowTimer <= 0) {
+                this.slowFactor = 1;
+            }
         }
-        return;
-    }
 
-    if (this.isOrbiting) {
-        this.orbitAngle += 3 * this.orbitSpeed * dt;
-        this.x = player.x + Math.cos(this.orbitAngle) * this.orbitDist;
-        this.y = player.y + Math.sin(this.orbitAngle) * this.orbitDist;
+        if (this.isHordeEnemy) {
+            const effectiveSpeed = this.baseSpd * this.slowFactor;
+            this.x += this.hordeVx * effectiveSpeed * dt;
+            this.y += this.hordeVy * effectiveSpeed * dt;
 
-        this.orbitTrail.push({x: this.x, y: this.y, life: 0.2});
-        for (let i = this.orbitTrail.length - 1; i >= 0; i--) {
-            this.orbitTrail[i].life -= dt;
-            if (this.orbitTrail[i].life <= 0) this.orbitTrail.splice(i, 1);
+            const despawnRange = 200;
+            if (this.x < camera.x - despawnRange || this.x > camera.x + canvas.width + despawnRange ||
+                this.y < camera.y - despawnRange || this.y > camera.y + canvas.height + despawnRange) {
+                enemies.recycle(this);
+                return;
+            }
+        } else {
+            const dx = player.x - this.x;
+            const dy = player.y - this.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const effectiveSpeed = this.baseSpd * this.slowFactor;
+            this.x += (dx / d) * effectiveSpeed * dt;
+            this.y += (dy / d) * effectiveSpeed * dt;
         }
 
         for (const e of enemies.active) {
-            if (e !== this && !e.isOrbiting && Math.hypot(e.x - this.x, e.y - this.y) < e.r + this.r) {
-                const finalDmg = Math.max(1, this.orbitDamage - e.armor);
-                e.hp -= finalDmg;
-                e.hitFlash = 0.2;
+            if (e === this) continue;
+            const dx2 = e.x - this.x;
+            const dy2 = e.y - this.y;
+            const dist = Math.hypot(dx2, dy2);
+            if (dist < e.r + this.r && dist > 0) {
+                const push = 0.5 * (e.r + this.r - dist) / dist;
+                this.x -= dx2 * push;
+                this.y -= dy2 * push;
             }
         }
 
-        for (const b of breakables.active) {
-            if (Math.hypot(b.x - this.x, b.y - this.y) < b.r + this.r) {
-                b.destroy();
+        if (Math.hypot(player.x - this.x, player.y - this.y) < this.r + player.r && player.invuln <= 0) {
+            if (!player.godMode) {
+                const damage = Math.max(1, this.dmg - player.stats.Armor);
+                player.hp -= damage;
+                player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow);
+                player.invuln = 0.2;
+                const h = hitmarks.spawn();
+                h.spawn(this.x, this.y, damage, "#f00");
             }
         }
-
-        this.orbitDuration -= dt;
-        if (this.orbitDuration <= 0) {
-            this.isOrbiting = false;
-            const finalDmg = Math.max(1, this.orbitDamage * 2); // Final damage burst
-            this.hp -= finalDmg;
-            this.hitFlash = 0.5;
-        }
-        return; // Skip normal behavior
     }
- 
-    // ----- Hit flash decay (FIXED: dt belongs here) ----- 
-    if (this.hitFlash > 0) { 
-      this.hitFlash -= dt; 
-      if (this.hitFlash < 0) this.hitFlash = 0; 
-    } 
- 
-    // ----- Slow decay ----- 
-    if (this.slowTimer > 0) { 
-      this.slowTimer -= dt; 
-      if (this.slowTimer <= 0) { 
-        this.slowFactor = 1; 
-      } 
-    } 
- 
-    // ----- Movement ----- 
-    const dx = player.x - this.x; 
-    const dy = player.y - this.y; 
-    const d = Math.hypot(dx, dy) || 1; 
- 
-    const effectiveSpeed = this.baseSpd * this.slowFactor; 
-    this.x += (dx / d) * effectiveSpeed * dt; 
-    this.y += (dy / d) * effectiveSpeed * dt; 
- 
-    // ----- Separation ----- 
-    for (const e of enemies.active) { 
-      if (e === this) continue; 
-      const dx2 = e.x - this.x; 
-      const dy2 = e.y - this.y; 
-      const dist = Math.hypot(dx2, dy2); 
-      if (dist < e.r + this.r && dist > 0) { 
-        const push = 0.5 * (e.r + this.r - dist) / dist; 
-        this.x -= dx2 * push; 
-        this.y -= dy2 * push; 
-      } 
-    } 
- 
-    // ----- Player collision damage ----- 
-    if (d < this.r + player.r && player.invuln <= 0) { 
-      const damage = Math.max(1, this.dmg - player.stats.Armor);
-      player.hp -= damage; 
-      player.hitSlow = Math.min(0.15, 0.05 + player.hitSlow); 
-      player.invuln = 0.2; 
- 
-      const h = hitmarks.spawn(); 
-      h.spawn(this.x, this.y, damage, "#f00"); 
-    } 
-  } 
+}
  
   render() { 
-    if (this.isOrbiting) {
-        for (const p of this.orbitTrail) {
-            ctx.fillStyle = `rgba(200, 200, 255, ${p.life / 0.2 * 0.5})`;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, this.r * (p.life / 0.2), 0, Math.PI * 2);
-            ctx.fill();
-        }
-    }
     ctx.fillStyle = this.hitFlash > 0 ? "#fff" : (this.isFrozen ? "#add8e6" : EnemyTypes[this.type].color);
     ctx.beginPath(); 
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2); 
@@ -2966,39 +3203,86 @@ class Enemy {
 } 
  
  
-const enemies = new Pool(()=>new Enemy(),500); 
+const enemies = new Pool(()=>new Enemy(), 800); 
 let spawnTimer = 0;
 let lastSpawnMinute = -1;
 let enemyLimit = 50;
 let minEnemyLimit = 6;
 
+let hordeSpawnTimer = 30;
+let nextBossSpawnTime = 120;
+
 const spawnTimeline = [
-    ['goblin'], // 0-1 min
-    ['goblin', 'bat'], // 1-2 min
-    ['goblin', 'bat', 'skeleton'], // 2-3 min
-    ['skeleton', 'sprinter'], // 3-4 min
-    ['skeleton', 'orc'], // 4-5 min
-    ['orc', 'sprinter', 'tank'], // 5-6 min
-    ['golem', 'sprinter'], // 6-7 min
-    ['golem', 'tank'],       // 7-8 min
-    ['sprinter', 'tank', 'orc', 'skeleton'], // 8-9 min
-    ['golem'] // 9-10 min
+    // 0-3 Minutes: Introduction to basic enemies
+    { t: 0,    max: 15, types: ['bat'] },
+    { t: 20,   max: 20, types: ['bat', 'goblin'] },
+    { t: 60,   max: 25, types: ['goblin', 'skeleton'] },
+    { t: 120,  max: 30, types: ['skeleton', 'imp'] },
+    { t: 150,  max: 35, types: ['goblin', 'imp', 'bat'] },
+    
+    // 3-8 Minutes: Faster and tougher enemies, introduce miniboss
+    { t: 180,  max: 40, types: ['sprinter', 'orc'] },
+    { t: 240,  max: 45, types: ['orc', 'banshee'] },
+    { t: 300,  max: 50, types: ['sprinter', 'banshee', 'skeleton'] },
+    { t: 360,  max: 55, types: ['orc', 'sprinter', 'imp'] },
+    { t: 420,  max: 60, types: ['banshee', 'golem'] }, // Golem miniboss appears
+
+    // 8-15 Minutes: More durable and dangerous enemies
+    { t: 480,  max: 65, types: ['shadow', 'warlock'] },
+    { t: 600,  max: 70, types: ['warlock', 'golem'] },
+    { t: 720,  max: 75, types: ['shadow', 'banshee', 'orc'] },
+    { t: 840,  max: 80, types: ['gargoyle', 'warlock'] }, // Gargoyle miniboss appears
+
+    // 15-25 Minutes: High-tier regular enemies and powerful minibosses
+    { t: 900,  max: 85, types: ['behemoth', 'reaver'] },
+    { t: 1020, max: 90, types: ['reaver', 'shadow', 'warlock'] },
+    { t: 1140, max: 95, types: ['behemoth', 'gargoyle'] },
+    { t: 1260, max: 100, types: ['cyclops', 'reaver'] }, // Cyclops miniboss appears
+    { t: 1380, max: 110, types: ['behemoth', 'reaver', 'shadow'] },
+
+    // 25-30+ Minutes: The ultimate challenge
+    { t: 1500, max: 120, types: ['abomination', 'cyclops'] },
+    { t: 1600, max: 130, types: ['abomination', 'behemoth', 'reaver'] },
+    { t: 1700, max: 140, types: ['abomination', 'cyclops', 'gargoyle'] },
+    // After 30 minutes, the timeline repeats from the 25-minute mark (1500s)
+    { t: 1800, max: 150, types: ['abomination', 'reaver', 'behemoth', 'cyclops'], repeat: 1500 },
 ];
 
 const bossTimeline = [
-    { time: 120, type: 'ogre_boss' }, // 2:00
-    { time: 240, type: 'ogre_boss' }, // 4:00
-    { time: 360, type: 'lich_boss' }, // 6:00
-    { time: 480, type: 'lich_boss' }, // 8:00
-    { time: 600, type: 'doom_knight_boss' }, // 10:00
+    { t: 120, type: 'ogre_boss' },  // 2 min
+    { t: 240, type: 'ogre_boss' },  // 4 min
+    { t: 360, type: 'lich' },       // 6 min
+    { t: 480, type: 'ogre_boss' },  // 8 min
+    { t: 600, type: 'lich' },       // 10 min
+    { t: 720, type: 'doomknight' }, // 12 min
+    { t: 840, type: 'lich' },       // 14 min
+    { t: 960, type: 'doomknight' }, // 16 min
+    { t: 1080, type: ['ogre_boss', 'lich'] }, // 18 min
+    { t: 1200, type: 'doomknight' }, // 20 min
+    { t: 1320, type: ['lich', 'doomknight'] }, // 22 min
+    { t: 1440, type: ['ogre_boss', 'ogre_boss'] }, // 24 min
+    { t: 1560, type: ['doomknight', 'doomknight'] }, // 26 min
+    { t: 1680, type: ['lich', 'lich', 'lich'] }, // 28 min
+    { t: 1800, type: ['ogre_boss', 'lich', 'doomknight'] } // 30 min
 ];
 
 const hordeTimeline = [
-    { time: 90, count: 15, type: 'ghoul' },  // 1:30
-    { time: 210, count: 20, type: 'ghoul' }, // 3:30
-    { time: 330, count: 25, type: 'ghoul' }, // 5:30
-    { time: 450, count: 30, type: 'ghoul' }, // 7:30
-    { time: 570, count: 35, type: 'ghoul' }, // 9:30
+    { t: 90,   type: 'ghoul',      count: 20 }, // 1:30
+    { t: 210,  type: 'ghoul',      count: 30 }, // 3:30
+    { t: 330,  type: 'spiderling', count: 25 }, // 5:30
+    { t: 450,  type: 'zombie',     count: 20 }, // 7:30
+    { t: 570,  type: 'ghoul',      count: 40 }, // 9:30
+    { t: 690,  type: 'spiderling', count: 35 }, // 11:30
+    { t: 810,  type: 'zombie',     count: 30 }, // 13:30
+    { t: 930,  type: 'ghoul',      count: 50 }, // 15:30
+    { t: 1050, type: 'spiderling', count: 45 }, // 17:30
+    { t: 1170, type: 'zombie',     count: 40 }, // 19:30
+    // ... continues every 2 mins, alternating and increasing count
+    { t: 1290, type: 'ghoul',      count: 60 },
+    { t: 1410, type: 'spiderling', count: 55 },
+    { t: 1530, type: 'zombie',     count: 50 },
+    { t: 1650, type: 'ghoul',      count: 70 },
+    { t: 1770, type: 'spiderling', count: 65 },
 ];
  
 // ------------------- XP crystals (magnet rework applied) ------------------- 
@@ -3064,19 +3348,7 @@ class XPCrystal {
   } 
 } 
 const xpCrystals=new Pool(()=>new XPCrystal(),500); 
-function dropXP(x, y, baseXP) {
-    let spawnX = x;
-    let spawnY = y;
-    for (const o of obstacles.active) {
-        if (spawnX > o.x - o.width / 2 && spawnX < o.x + o.width / 2 &&
-            spawnY > o.y - o.height / 2 && spawnY < o.y + o.height / 2) {
-            const closest = getClosestPointOnRect(spawnX, spawnY, o.x, o.y, o.width, o.height);
-            spawnX = closest.x;
-            spawnY = closest.y;
-        }
-    }
-    const intPart=Math.floor(baseXP); const frac=baseXP-intPart; let finalXP=intPart; if(Math.random()<frac) finalXP++; if(finalXP>0){ const c=xpCrystals.spawn(); c.spawn(spawnX, spawnY, finalXP); } 
-} 
+function dropXP(x,y,baseXP){ const intPart=Math.floor(baseXP); const frac=baseXP-intPart; let finalXP=intPart; if(Math.random()<frac) finalXP++; if(finalXP>0){ const c=xpCrystals.spawn(); c.spawn(x,y,finalXP); pushOutOfObstacles(c); } } 
 function awardXP(amount){ player.addXP(amount); }
 
 // ------------------- Pickups -------------------
@@ -3097,6 +3369,7 @@ class Pickup {
         this.active = true;
         this.magnetized = false;
         this.speed = 0;
+        pushOutOfObstacles(this);
     }
 
     update(dt) {
@@ -3153,19 +3426,22 @@ class Pickup {
                 enemies.active.forEach(e => {
                     if (!EnemyTypes[e.type].isBoss) e.hp = 0;
                 });
-                // Add screen flash effect
-                const flash = document.getElementById('flashEffect');
-                flash.style.transition = 'background-color 0.05s ease-out';
-                flash.style.backgroundColor = 'rgba(255, 255, 224, 0.7)';
+                const flash = document.getElementById('flashOverlay');
+                flash.style.transition = 'opacity 0.4s ease-out';
+                flash.style.opacity = 1;
                 setTimeout(() => {
-                    flash.style.transition = 'background-color 0.4s ease-in';
-                    flash.style.backgroundColor = 'rgba(255, 255, 224, 0)';
-                }, 50);
+                    flash.style.opacity = 0;
+                }, 150);
                 break;
-            case 'clock':
+            case 'clock': {
                 const duration = 8 * (1 + (player.stats.Duration || 0) / 100);
+                timeStopEffect.active = true;
+                // If effect is already active, reset the timer to the full new duration.
+                // Otherwise, just set it.
+                timeStopEffect.timer = duration; 
                 enemies.active.forEach(e => e.freeze(duration));
                 break;
+            }
             case 'clover':
                 player.stats.Luck += 10;
                 const h = hitmarks.spawn();
@@ -3179,9 +3455,9 @@ class Pickup {
         ctx.save();
         ctx.translate(this.x, this.y);
         let icon = '?';
-        let fontSize = '24px';
+        let fontSize = 24;
         switch (this.type) {
-            case 'coin': icon = '🪙'; fontSize = '16px'; break;
+            case 'coin': icon = '🪙'; fontSize = 16; break;
             case 'coin_bag':
             case 'chest_coin_bag': icon = '💰'; break;
             case 'chest': icon = '📦'; break;
@@ -3192,9 +3468,8 @@ class Pickup {
             case 'clock': icon = '🕒'; break;
             case 'clover': icon = '🍀'; break;
         }
-        ctx.font = `${fontSize} serif`;
-        const size = parseInt(fontSize) / 2;
-        ctx.fillText(icon, -size, size);
+        ctx.font = `${fontSize}px serif`;
+        ctx.fillText(icon, -fontSize / 2, fontSize / 2);
         ctx.restore();
     }
 }
@@ -3242,6 +3517,7 @@ class FlameParticle {
                 const finalDmg = Math.max(1, this.damage - e.armor);
                 e.hp -= finalDmg;
                 this.hitEnemies.add(e);
+                const h = hitmarks.spawn(); h.spawn(e.x, e.y, finalDmg, "#ff4500");
             }
         }
 
@@ -3277,9 +3553,11 @@ class DamagingZone {
         this.duration = 0;
         this.hitEnemies = new Map();
         this.hitboxDelay = 0.5;
+        this.isMagnetic = false;
+        this.target = null;
     }
 
-    spawn(x, y, radius, damage, duration) {
+    spawn(x, y, radius, damage, duration, isMagnetic = false) {
         this.x = x;
         this.y = y;
         this.radius = radius;
@@ -3287,6 +3565,8 @@ class DamagingZone {
         this.duration = duration;
         this.active = true;
         this.hitEnemies.clear();
+        this.isMagnetic = isMagnetic;
+        this.target = null;
     }
 
     update(dt) {
@@ -3298,13 +3578,36 @@ class DamagingZone {
             return;
         }
 
+        if (this.isMagnetic) {
+            if (!this.target || this.target.hp <= 0) {
+                let nearest = null;
+                let nd = Infinity;
+                for (const e of enemies.active) {
+                    const d = Math.hypot(e.x - this.x, e.y - this.y);
+                    if (d < nd) {
+                        nd = d;
+                        nearest = e;
+                    }
+                }
+                this.target = nearest;
+            }
+
+            if (this.target) {
+                const dx = this.target.x - this.x;
+                const dy = this.target.y - this.y;
+                const d = Math.hypot(dx, dy) || 1;
+                this.x += (dx / d) * 50 * dt;
+                this.y += (dy / d) * 50 * dt;
+            }
+        }
+
         for (const e of enemies.active) {
             if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.r) {
                 if (!this.hitEnemies.has(e) || gameTime - this.hitEnemies.get(e) > this.hitboxDelay) {
                     const finalDmg = Math.max(1, this.damage - e.armor);
                     e.hp -= finalDmg;
                     const h = hitmarks.spawn();
-                    h.spawn(e.x, e.y, finalDmg, "#6464ff");
+                    h.spawn(e.x, e.y, finalDmg, this.isMagnetic ? "#ffff00" : "#add8e6");
                     this.hitEnemies.set(e, gameTime);
                 }
             }
@@ -3321,7 +3624,11 @@ class DamagingZone {
         if (!this.active) return;
         ctx.save();
         ctx.globalAlpha = 0.5;
-        ctx.fillStyle = 'rgba(100, 100, 255, 0.5)';
+        ctx.fillStyle = this.isMagnetic ? 'rgba(255, 255, 0, 0.5)' : 'rgba(100, 100, 255, 0.5)';
+        if (this.isMagnetic) {
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'yellow';
+        }
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -3348,34 +3655,25 @@ class Breakable {
     }
 
     destroy() {
-        let spawnX = this.x;
-        let spawnY = this.y;
-        
-        for (const o of obstacles.active) {
-            if (this.x > o.x - o.width / 2 && this.x < o.x + o.width / 2 &&
-                this.y > o.y - o.height / 2 && this.y < o.y + o.height / 2) {
-                const closest = getClosestPointOnRect(this.x, this.y, o.x, o.y, o.width, o.height);
-                spawnX = closest.x;
-                spawnY = closest.y;
-                break; 
-            }
-        }
-
         const luck = 1 + (player.stats.Luck / 100);
         const rand = Math.random();
-        let pickupType = null;
 
-        if (rand < 0.01 * luck) pickupType = 'sun';
-        else if (rand < 0.03 * luck) pickupType = 'clock';
-        else if (rand < 0.06 * luck) pickupType = 'clover';
-        else if (rand < 0.15 * luck) pickupType = 'coin_bag';
-        else if (rand < 0.4 * luck) pickupType = 'coin';
-        else if (rand < 0.5 * luck) pickupType = 'floor_chicken';
-        else if (rand < 0.55 * luck) pickupType = 'magnet';
-        else if (rand < 0.6 * luck) pickupType = 'flame_breath';
-
-        if (pickupType) {
-            pickups.spawn().spawn(spawnX, spawnY, pickupType);
+        if (rand < 0.01 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'sun');
+        } else if (rand < 0.03 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'clock');
+        } else if (rand < 0.06 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'clover');
+        } else if (rand < 0.15 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'coin_bag');
+        } else if (rand < 0.4 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'coin');
+        } else if (rand < 0.5 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'floor_chicken');
+        } else if (rand < 0.55 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'magnet');
+        } else if (rand < 0.6 * luck) {
+            pickups.spawn().spawn(this.x, this.y, 'flame_breath');
         }
 
         this.active = false;
@@ -3384,20 +3682,143 @@ class Breakable {
 
     render() {
         if (!this.active) return;
+        const size = this.r * 2;
         ctx.save();
         ctx.translate(this.x, this.y);
+
+        // Main box color
         ctx.fillStyle = '#8B4513';
-        ctx.fillRect(-this.r, -this.r, this.r * 2, this.r * 2);
+        ctx.fillRect(-this.r, -this.r, size, size);
+
+        // Outline
         ctx.strokeStyle = '#5A2D0C';
         ctx.lineWidth = 2;
-        ctx.strokeRect(-this.r, -this.r, this.r * 2, this.r * 2);
+        ctx.strokeRect(-this.r, -this.r, size, size);
+
+        // Planks
+        ctx.beginPath();
+        ctx.moveTo(-this.r, -this.r / 3);
+        ctx.lineTo(this.r, -this.r / 3);
+        ctx.moveTo(-this.r, this.r / 3);
+        ctx.lineTo(this.r, this.r / 3);
+        ctx.stroke();
+
+        // X pattern
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(-this.r, -this.r);
+        ctx.lineTo(this.r, this.r);
+        ctx.moveTo(this.r, -this.r);
+        ctx.lineTo(-this.r, this.r);
+        ctx.stroke();
+
+
         ctx.restore();
     }
 }
 const breakables = new Pool(() => new Breakable(), 50);
+
+// ------------------- Obstacles -------------------
+class Obstacle {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.width = 100;
+        this.height = 100;
+    }
+
+    spawn(x, y, width, height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.active = true;
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.fillStyle = 'rgba(0, 50, 100, 0.7)';
+        ctx.strokeStyle = '#00f';
+        ctx.lineWidth = 2;
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.strokeRect(this.x, this.y, this.width, this.height);
+    }
+}
 const obstacles = new Pool(() => new Obstacle(), 50);
+
+// ------------------- Activation Ring -------------------
+class ActivationRing {
+    constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.radius = 60;
+        this.activated = false;
+        this.alpha = 1;
+    }
+
+    spawn(x, y) {
+        this.x = x;
+        this.y = y;
+        this.active = true;
+        this.activated = false;
+        this.alpha = 1;
+    }
+
+    update(dt) {
+        if (!this.active) return;
+
+        if (!this.activated && Math.hypot(player.x - this.x, player.y - this.y) < this.radius) {
+            this.activated = true;
+            this.trigger();
+        }
+
+        if (this.activated) {
+            this.alpha -= dt * 2;
+            if (this.alpha <= 0) {
+                this.active = false;
+                activationRings.recycle(this);
+            }
+        }
+    }
+    
+    trigger() {
+        const e = enemies.spawn();
+        e.init('guardian');
+        e.x = this.x;
+        e.y = this.y - 200; // Spawn 200px above the ring center
+        e.hp = 150 + 15 * player.level; // Custom HP scaling
+    }
+
+    render() {
+        if (!this.active) return;
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.strokeStyle = this.activated ? 'gold' : '#0ff';
+        ctx.lineWidth = 5;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = this.activated ? 'gold' : '#0ff';
+        
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (this.activated) {
+            for (let i = 0; i < 5; i++) {
+                const progress = (1 - this.alpha);
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * progress * (1 + i/5), 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        
+        ctx.restore();
+    }
+}
 const activationRings = new Pool(() => new ActivationRing(), 10);
- 
+
+
 // ------------------- Passive items & map ------------------- 
 const passiveItems = [ 
   { id:"iron_plate", name:"Iron Plate", icon:"🛡️", stat:"Armor", value:1, maxLevel:5, descLvl: (v)=>`Armor +${v}` }, 
@@ -3533,80 +3954,106 @@ function renderHUD(){
 // ------------------- Main update & render ------------------- 
 function update(dt){ 
   if(paused) return; 
+  updateWorldGeneration();
   player.update(dt); 
  
-  // Timeline-based spawning
-  const minute = Math.floor(gameTime / 60);
-  if (minute !== lastSpawnMinute) {
-    lastSpawnMinute = minute;
-    enemyLimit += 10; // Increase enemy limit every minute
-    minEnemyLimit += 2; // Increase min enemy limit every minute
+  if (timeStopEffect.active) {
+    timeStopEffect.timer -= dt;
+    if (timeStopEffect.timer <= 0) {
+        timeStopEffect.active = false;
+    }
   }
 
-    for (const boss of bossTimeline) {
-        if (gameTime >= boss.time && !boss.spawned) {
-            const e = enemies.spawn();
-            e.type = boss.type;
-            e.spawn(player.x, player.y);
-            boss.spawned = true;
-        }
-    }
-
-    for (const horde of hordeTimeline) {
-        if (gameTime >= horde.time && !horde.spawned) {
-            const corners = [
-                { x: camera.x - 50, y: camera.y - 50, tx: camera.x + canvas.width + 50, ty: camera.y + canvas.height + 50 },
-                { x: camera.x + canvas.width + 50, y: camera.y - 50, tx: camera.x - 50, ty: camera.y + canvas.height + 50 },
-                { x: camera.x - 50, y: camera.y + canvas.height + 50, tx: camera.x + canvas.width + 50, ty: camera.y - 50 },
-                { x: camera.x + canvas.width + 50, y: camera.y + canvas.height + 50, tx: camera.x - 50, ty: camera.y - 50 }
-            ];
-            const corner = corners[Math.floor(Math.random() * corners.length)];
-
-            for (let i = 0; i < horde.count; i++) {
-                const e = enemies.spawn();
-                e.type = horde.type;
-                e.isHordeMember = true;
-                e.hordeTargetX = corner.tx;
-                e.hordeTargetY = corner.ty;
-                e.spawn(corner.x + (Math.random() - 0.5) * 100, corner.y + (Math.random() - 0.5) * 100);
+    // --- New Spawning Logic ---
+    let currentWave = spawnTimeline[0];
+    let waveRepeatStartTime = -1;
+    for (const wave of spawnTimeline) {
+        if (gameTime >= wave.t) {
+            currentWave = wave;
+            if (wave.repeat) {
+                waveRepeatStartTime = wave.repeat;
             }
-            horde.spawned = true;
+        } else {
+            break;
+        }
+    }
+    
+    // Handle timeline repeating after 30 mins
+    if (waveRepeatStartTime !== -1) {
+        const timeIntoRepeat = gameTime - 1800;
+        const repeatDuration = 1800 - waveRepeatStartTime;
+        const effectiveRepeatTime = waveRepeatStartTime + (timeIntoRepeat % repeatDuration);
+        for (const wave of spawnTimeline) {
+            if (effectiveRepeatTime >= wave.t) {
+                currentWave = wave;
+            } else {
+                break;
+            }
         }
     }
 
-  const spawnTypes = spawnTimeline[Math.min(minute, spawnTimeline.length - 1)];
-  spawnTimer -= dt;
+    // Regular Spawning
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && enemies.active.length < currentWave.max) {
+        const curse = 1 + (player.stats.Curse / 100);
+        spawnTimer = Math.max(0.05, 0.5 / curse); // Adjusted base spawn rate
+        
+        const spawnType = currentWave.types[Math.floor(Math.random() * currentWave.types.length)];
+        const e = enemies.spawn();
+        e.init(spawnType);
+        e.spawn(player.x, player.y);
+    }
+    
+    // Boss Spawning
+    for (const bossEvent of bossTimeline) {
+        if (gameTime >= bossEvent.t && gameTime < bossEvent.t + dt) {
+            const bossTypes = Array.isArray(bossEvent.type) ? bossEvent.type : [bossEvent.type];
+            for (const type of bossTypes) {
+                const e = enemies.spawn();
+                e.init(type);
+                e.spawn(player.x, player.y);
+            }
+        }
+    }
 
-  // If below min enemy count, spawn much faster
-  if (enemies.active.length < minEnemyLimit) {
-      spawnTimer = -0.1; // Force spawn next frame
-  }
+    // Horde Spawning
+    for (const hordeEvent of hordeTimeline) {
+        if (gameTime >= hordeEvent.t && gameTime < hordeEvent.t + dt) {
+             const corner = Math.floor(Math.random() * 4);
+            const margin = 100;
+            let spawnX, spawnY, targetX, targetY;
 
-  if (spawnTimer <= 0 && enemies.active.length < enemyLimit) {
-    const curse = 1 + (player.stats.Curse / 100);
-    spawnTimer = Math.max(0.05, 0.4 / curse - minute * 0.015); // Spawn faster over time
-    const ang = Math.random() * Math.PI * 2;
-    const dist = 400 + Math.random() * 300;
-    const x = player.x + Math.cos(ang) * dist;
-    const y = player.y + Math.sin(ang) * dist;
+            switch (corner) {
+                case 0: spawnX = camera.x - margin; spawnY = camera.y - margin; targetX = camera.x + canvas.width + margin; targetY = camera.y + canvas.height + margin; break;
+                case 1: spawnX = camera.x + canvas.width + margin; spawnY = camera.y - margin; targetX = camera.x - margin; targetY = camera.y + canvas.height + margin; break;
+                case 2: spawnX = camera.x - margin; spawnY = camera.y + canvas.height + margin; targetX = camera.x + canvas.width + margin; targetY = camera.y - margin; break;
+                case 3: spawnX = camera.x + canvas.width + margin; spawnY = camera.y + canvas.height + margin; targetX = camera.x - margin; targetY = camera.y - margin; break;
+            }
 
-    const e = enemies.spawn();
-    e.type = spawnTypes[Math.floor(Math.random() * spawnTypes.length)];
-    e.spawn(x, y);
-  }
+            const dx = targetX - spawnX; const dy = targetY - spawnY; const d = Math.hypot(dx, dy) || 1;
+            const vx = dx / d; const vy = dy / d;
+
+            for (let i = 0; i < hordeEvent.count; i++) {
+                const e = enemies.spawn();
+                e.init(hordeEvent.type);
+                e.spawnAsHordeMember(spawnX, spawnY, vx, vy);
+            }
+        }
+    }
 
   enemies.active.slice().forEach(e => e.update(dt));
   projectiles.active.slice().forEach(p => p.update(dt));
   crossProjectiles.active.slice().forEach(p => p.update(dt));
-  crucifixProjectiles.active.slice().forEach(p => p.update(dt));
   fireballs.active.slice().forEach(f => f.update(dt));
+  vulcanProjectiles.active.slice().forEach(p => p.update(dt));
   staticEffects.active.slice().forEach(s => s.update(dt));
   demonicSigils.active.slice().forEach(s => s.update(dt));
-  thunderstormCircles.active.forEach(c => c.update(dt));
+    demonicRealms.active.slice().forEach(s => s.update(dt));
   xpCrystals.active.slice().forEach(c => c.update(dt));
   pickups.active.slice().forEach(p => p.update(dt));
   flameParticles.active.slice().forEach(p => p.update(dt));
   damagingZones.active.slice().forEach(z => z.update(dt));
+  activationRings.active.slice().forEach(r => r.update(dt));
   hitmarks.active.slice().forEach(h => h.update(dt));
 
   const offScreenCrystals = xpCrystals.active.filter(c => 
@@ -3627,29 +4074,28 @@ function update(dt){
     newCrystal.spawn(x, y, totalXP);
   }
 
-  updateWorldGeneration();
-  cleanupDistantChunks();
+    // Despawn distant boxes
+    for (const b of breakables.active) {
+        if (Math.hypot(b.x - player.x, b.y - player.y) > 2000) {
+            breakables.recycle(b);
+        }
+    }
 
-  activationRings.active.forEach(r => r.update(dt));
 
   for (let i = thunderbolts.length - 1; i >= 0; i--) {
     const bolt = thunderbolts[i];
     bolt.timer -= dt;
     if (bolt.timer <= 0) {
-      const hitRadius = 30;
       for (const e of enemies.active) {
-        if (Math.hypot(e.x - bolt.x, e.y - bolt.y) < hitRadius) { 
+        if (Math.hypot(e.x - bolt.x, e.y - bolt.y) < 30) { 
           const finalDmg = Math.max(1, bolt.damage - e.armor);
           e.hp -= finalDmg;
           const h = hitmarks.spawn();
-          h.spawn(e.x, e.y, finalDmg, "#ff0");
+            h.spawn(e.x, e.y, finalDmg, "#ffd700");
         }
       }
-        if (bolt.isThunderstorm) {
-            thunderstormCircles.spawn().spawn(bolt.x, bolt.y, bolt.damage, bolt.area);
-        }
       for (const b of breakables.active) {
-        if (Math.hypot(b.x - bolt.x, b.y - bolt.y) < hitRadius) {
+        if (Math.hypot(b.x - bolt.x, b.y - bolt.y) < 30) {
           b.destroy();
         }
       }
@@ -3673,11 +4119,11 @@ function update(dt){
           const finalDmg = Math.max(1, pulse.damage - e.armor);
           e.hp -= finalDmg;
           const h = hitmarks.spawn();
-          h.spawn(e.x, e.y, finalDmg, "#f66");
+          h.spawn(e.x, e.y, finalDmg, pulse.heals ? "#90ee90" : "#f66");
           pulse.hitEnemies.add(e);
-            if (pulse.isHealing && pulse.healAmount > 0) {
-                player.hp = Math.min(player.maxhp, player.hp + pulse.healAmount);
-            }
+          if (pulse.heals) {
+              player.hp = Math.min(player.maxhp, player.hp + (player.stats.Recovery / 2));
+          }
         }
       }
     }
@@ -3695,153 +4141,11 @@ function update(dt){
 } 
  
  
-function updateWorldGeneration() {
-    const playerChunkX = Math.floor(player.x / CHUNK_SIZE);
-    const playerChunkY = Math.floor(player.y / CHUNK_SIZE);
-
-    for (let y = playerChunkY - 1; y <= playerChunkY + 1; y++) {
-        for (let x = playerChunkX - 1; x <= playerChunkX + 1; x++) {
-            const chunkId = `${x},${y}`;
-            if (!generatedChunks.has(chunkId)) {
-                generatedChunks.add(chunkId);
-                generateChunk(x, y);
-            }
-        }
-    }
-}
-
-function generateChunk(chunkX, chunkY) {
-    const chunkCenterX = chunkX * CHUNK_SIZE + CHUNK_SIZE / 2;
-    const chunkCenterY = chunkY * CHUNK_SIZE + CHUNK_SIZE / 2;
-
-    // Don't spawn things in the starting chunk (0,0)
-    if (chunkX === 0 && chunkY === 0) return;
-
-    // Spawn Obstacles
-    if (Math.random() < 0.7) { // 70% chance for an obstacle
-        const o = obstacles.spawn();
-        const width = 100 + Math.random() * 200;
-        const height = 100 + Math.random() * 200;
-        const x = chunkCenterX + (Math.random() - 0.5) * (CHUNK_SIZE - width);
-        const y = chunkCenterY + (Math.random() - 0.5) * (CHUNK_SIZE - height);
-        o.spawn(x, y, width, height);
-    }
-
-    // Spawn Activation Rings (rarely, and not inside obstacles)
-    if (Math.random() < 0.005) { // 0.5% chance
-        let validSpawn = true;
-        const x = chunkCenterX + (Math.random() - 0.5) * (CHUNK_SIZE - 200);
-        const y = chunkCenterY + (Math.random() - 0.5) * (CHUNK_SIZE - 200);
-        for (const o of obstacles.active) {
-            if (x > o.x - o.width / 2 && x < o.x + o.width / 2 &&
-                y > o.y - o.height / 2 && y < o.y + o.height / 2) {
-                validSpawn = false;
-                break;
-            }
-        }
-        if (validSpawn) {
-            const ring = activationRings.spawn();
-            ring.spawn(x, y);
-        }
-    }
-
-    // Spawn Breakable Box Patterns
-    if (Math.random() < 0.2) { // 20% chance for a pattern
-        const patternType = ['grid2x2', 'grid3x3', 'circle', 'cross'][Math.floor(Math.random() * 4)];
-        const centerX = chunkCenterX + (Math.random() - 0.5) * (CHUNK_SIZE / 2);
-        const centerY = chunkCenterY + (Math.random() - 0.5) * (CHUNK_SIZE / 2);
-        const spacing = canvas.width / 4;
-
-        let validSpawn = true;
-        for (const o of obstacles.active) {
-            if (centerX > o.x - o.width / 2 && centerX < o.x + o.width / 2 &&
-                centerY > o.y - o.height / 2 && centerY < o.y + o.height / 2) {
-                validSpawn = false;
-                break;
-            }
-        }
-
-        if (validSpawn) {
-            switch (patternType) {
-            case 'grid2x2':
-                for (let i = 0; i < 2; i++) {
-                    for (let j = 0; j < 2; j++) {
-                        breakables.spawn().spawn(centerX + i * spacing, centerY + j * spacing);
-                    }
-                }
-                break;
-            case 'grid3x3':
-                 for (let i = 0; i < 3; i++) {
-                    for (let j = 0; j < 3; j++) {
-                        breakables.spawn().spawn(centerX + i * spacing - spacing, centerY + j * spacing - spacing);
-                    }
-                }
-                break;
-            case 'circle':
-                const radius = spacing; // Use spacing for radius
-                for (let i = 0; i < 8; i++) {
-                    const angle = (i / 8) * Math.PI * 2;
-                    breakables.spawn().spawn(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius);
-                }
-                break;
-            case 'cross':
-                breakables.spawn().spawn(centerX, centerY);
-                breakables.spawn().spawn(centerX + spacing, centerY);
-                breakables.spawn().spawn(centerX - spacing, centerY);
-                breakables.spawn().spawn(centerX, centerY + spacing);
-                breakables.spawn().spawn(centerX, centerY - spacing);
-                break;
-        }
-        }
-    }
-}
-
-function cleanupDistantChunks() {
-    const playerChunkX = Math.floor(player.x / CHUNK_SIZE);
-    const playerChunkY = Math.floor(player.y / CHUNK_SIZE);
-    const cleanupDistance = 3; // Chunks further than this will be cleaned up
-
-    const chunksToRemove = [];
-    for (const chunkId of generatedChunks) {
-        const [x, y] = chunkId.split(',').map(Number);
-        if (Math.abs(x - playerChunkX) > cleanupDistance || Math.abs(y - playerChunkY) > cleanupDistance) {
-            chunksToRemove.push(chunkId);
-        }
-    }
-
-    for (const chunkId of chunksToRemove) {
-        generatedChunks.delete(chunkId);
-        const [chunkX, chunkY] = chunkId.split(',').map(Number);
-        const chunkStartX = chunkX * CHUNK_SIZE;
-        const chunkStartY = chunkY * CHUNK_SIZE;
-        const chunkEndX = chunkStartX + CHUNK_SIZE;
-        const chunkEndY = chunkStartY + CHUNK_SIZE;
-
-        // Recycle obstacles in this chunk
-        obstacles.active.slice().forEach(o => {
-            if (o.x >= chunkStartX && o.x < chunkEndX && o.y >= chunkStartY && o.y < chunkEndY) {
-                o.active = false; // Mark as inactive
-                obstacles.recycle(o);
-            }
-        });
-
-        // Recycle activation rings in this chunk
-        activationRings.active.slice().forEach(r => {
-            if (r.x >= chunkStartX && r.x < chunkEndX && r.y >= chunkStartY && r.y < chunkEndY) {
-                r.active = false; // Mark as inactive
-                activationRings.recycle(r);
-            }
-        });
-
-        // Recycle breakables in this chunk
-        breakables.active.slice().forEach(b => {
-            if (b.x >= chunkStartX && b.x < chunkEndX && b.y >= chunkStartY && b.y < chunkEndY) {
-                b.active = false; // Mark as inactive
-                breakables.recycle(b);
-            }
-        });
-    }
-}
+ 
+ 
+ 
+ 
+ 
  
 function render(){ 
   ctx.setTransform(1,0,0,1,0,0); 
@@ -3861,22 +4165,22 @@ function render(){
   xpCrystals.active.forEach(c => c.render()); 
   pickups.active.forEach(p => p.render());
   breakables.active.forEach(b => b.render());
-  obstacles.active.forEach(o => o.render());
-  activationRings.active.forEach(r => r.render());
   enemies.active.forEach(e => e.render()); 
   projectiles.active.forEach(p => p.render()); 
   crossProjectiles.active.forEach(p => p.render());
-  crucifixProjectiles.active.forEach(p => p.render());
   fireballs.active.forEach(f => f.render());
+  vulcanProjectiles.active.forEach(p => p.render());
   staticEffects.active.forEach(s => s.render());
   demonicSigils.active.forEach(s => s.render());
-  thunderstormCircles.active.forEach(c => c.render());
+  demonicRealms.active.forEach(s => s.render());
   flameParticles.active.forEach(p => p.render());
   damagingZones.active.forEach(z => z.render());
+  activationRings.active.forEach(r => r.render());
   renderThunderbolts();
   renderNovaPulses();
   hitmarks.active.forEach(h => h.render()); 
-  if(player.hp > 0) player.render(); 
+  if(player.hp > 0) player.render();
+  obstacles.active.forEach(o => o.render());
   ctx.restore(); 
  
   renderHUD(); 
@@ -3907,6 +4211,395 @@ player.weaponSlots[0].applyLevelEffects(player.weaponSlots[0].level); // ensure 
 // Keep inventory UI updated when passives change externally 
 updateInventoryUI(); 
 updatePassiveSlotsUI(); 
+
+// --- CONSOLE IMPLEMENTATION ---
+class ConsoleManager {
+    constructor() {
+        this.outputEl = document.getElementById('consoleOutput');
+        this.inputEl = document.getElementById('consoleInput');
+        this.autocompleteEl = document.getElementById('autocompleteList');
+        this.history = [];
+        this.historyIndex = -1;
+        this.commands = {};
+        this.suggestions = [];
+        this.selectedIndex = -1;
+
+        this.inputEl.addEventListener('keydown', this.onKeyDown.bind(this));
+        this.inputEl.addEventListener('input', this.onInput.bind(this));
+        this.inputEl.addEventListener('blur', () => this.hideSuggestions());
+        document.addEventListener('click', (e) => {
+            if (!this.inputEl.contains(e.target)) {
+                this.hideSuggestions();
+            }
+        });
+    }
+
+    onInput() {
+        this.updateSuggestions();
+    }
+    
+    hideSuggestions() {
+        this.autocompleteEl.style.display = 'none';
+        this.suggestions = [];
+        this.selectedIndex = -1;
+    }
+
+    updateSuggestions() {
+        const text = this.inputEl.value;
+        if (!text) {
+            this.hideSuggestions();
+            return;
+        }
+
+        const parts = text.split(' ');
+        const command = parts[0];
+        const arg = parts.length > 1 ? parts[parts.length - 1] : '';
+
+        let potentialSuggestions = [];
+        if (parts.length === 1) {
+            potentialSuggestions = Object.keys(this.commands).filter(c => c.startsWith(command));
+        } else {
+            const commandDef = this.commands[command];
+            if (commandDef && commandDef.getSuggestions) {
+                potentialSuggestions = commandDef.getSuggestions(parts.slice(1));
+            }
+        }
+
+        this.suggestions = potentialSuggestions;
+        this.selectedIndex = -1;
+
+        if (this.suggestions.length > 0) {
+            this.renderSuggestions();
+            this.autocompleteEl.style.display = 'block';
+        } else {
+            this.hideSuggestions();
+        }
+    }
+
+    renderSuggestions() {
+        this.autocompleteEl.innerHTML = '';
+        this.suggestions.forEach((suggestion, index) => {
+            const item = document.createElement('div');
+            item.className = 'autocomplete-item';
+            if (index === this.selectedIndex) {
+                item.classList.add('selected');
+            }
+            item.textContent = suggestion;
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                this.applySuggestion(suggestion);
+                this.inputEl.focus();
+            });
+            this.autocompleteEl.appendChild(item);
+        });
+    }
+
+    applySuggestion(suggestion) {
+        const parts = this.inputEl.value.split(' ');
+        parts[parts.length - 1] = suggestion;
+        this.inputEl.value = parts.join(' ') + ' ';
+        this.hideSuggestions();
+    }
+
+    onKeyDown(e) {
+        if (this.suggestions.length > 0 && this.autocompleteEl.style.display === 'block') {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.selectedIndex = (this.selectedIndex - 1 + this.suggestions.length) % this.suggestions.length;
+                this.renderSuggestions();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.selectedIndex = (this.selectedIndex + 1) % this.suggestions.length;
+                this.renderSuggestions();
+            } else if (e.key === 'Tab' || e.key === 'Enter') {
+                e.preventDefault();
+                if (this.selectedIndex !== -1) {
+                    this.applySuggestion(this.suggestions[this.selectedIndex]);
+                } else if (this.suggestions.length > 0) {
+                     this.applySuggestion(this.suggestions[0]);
+                }
+            } else if (e.key === 'Escape') {
+                this.hideSuggestions();
+            }
+        } else {
+            if (e.key === 'Enter') {
+                const text = this.inputEl.value;
+                if (text) {
+                    this.executeCommand(text);
+                    if (this.history[0] !== text) {
+                        this.history.unshift(text);
+                    }
+                    if (this.history.length > 50) this.history.pop();
+                    this.historyIndex = -1;
+                    this.inputEl.value = '';
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (this.history.length > 0 && this.historyIndex < this.history.length - 1) {
+                    this.historyIndex++;
+                    this.inputEl.value = this.history[this.historyIndex];
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (this.historyIndex > 0) {
+                    this.historyIndex--;
+                    this.inputEl.value = this.history[this.historyIndex];
+                } else {
+                    this.historyIndex = -1;
+                    this.inputEl.value = '';
+                }
+            }
+        }
+    }
+
+    registerCommand(name, handler, description = '', getSuggestions = null) {
+        this.commands[name] = { handler, description, getSuggestions };
+    }
+
+    executeCommand(text) {
+        this.hideSuggestions();
+        this.log(`> ${text}`);
+        const [command, ...args] = text.trim().split(/\s+/);
+        if (this.commands[command]) {
+            try {
+                const result = this.commands[command].handler(args);
+                if (result) this.log(result, 'log-success');
+            } catch (error) {
+                this.log(`Error: ${error.message}`, 'log-error');
+            }
+        } else {
+            this.log(`Unknown command: ${command}`, 'log-error');
+        }
+    }
+
+    log(message, className = '') {
+        const div = document.createElement('div');
+        div.textContent = message;
+        if (className) div.className = className;
+        this.outputEl.appendChild(div);
+        this.outputEl.scrollTop = this.outputEl.scrollHeight;
+    }
+}
+
+const consoleManager = new ConsoleManager();
+
+// --- COMMAND DEFINITIONS ---
+consoleManager.registerCommand('give', (args) => {
+    const [type, name, value = '1'] = args;
+    if (!type) throw new Error("Usage: give <type> ..., where type is 'item', 'coins', 'xp', 'stat', or 'pick_up'");
+
+    switch (type) {
+        case 'item': {
+            if (!name) throw new Error('Usage: give item <name> [level/amount]');
+            const numValue = parseInt(value, 10);
+            if (isNaN(numValue)) throw new Error('Invalid level/amount');
+            
+            const isWeapon = !!weaponsCatalog[name];
+            const isPassive = !!passiveMap[name];
+
+            if (!isWeapon && !isPassive) throw new Error(`Item '${name}' not found`);
+
+            if (isWeapon) {
+                let weaponInstance = player.weaponSlots.find(w => w && w.id === name);
+                if (weaponInstance) {
+                    const currentLevel = weaponInstance.level;
+                    if (currentLevel >= weaponInstance.maxLevel) throw new Error('Weapon at max level');
+                    const targetLevel = Math.min(weaponInstance.maxLevel, currentLevel + numValue);
+                    weaponInstance.applyLevelEffects(targetLevel);
+                    updateInventoryUI();
+                    return `Leveled up ${weaponInstance.name} to level ${targetLevel}.`;
+                } else {
+                    const freeSlot = player.weaponSlots.findIndex(s => !s);
+                    if (freeSlot === -1) throw new Error('Weapon slots are full');
+                    const newWeapon = cloneWeaponTemplate(weaponsCatalog[name]);
+                    player.weaponSlots[freeSlot] = newWeapon;
+                    const targetLevel = Math.min(newWeapon.maxLevel, numValue);
+                    newWeapon.applyLevelEffects(targetLevel);
+                    updateInventoryUI();
+                    return `Gave player ${newWeapon.name} (level ${newWeapon.level}).`;
+                }
+            } else { // isPassive
+                const passiveTemplate = passiveMap[name];
+                const currentLevel = player.passiveLevels[name] || 0;
+                if (currentLevel > 0) {
+                    if (currentLevel >= passiveTemplate.maxLevel) throw new Error('Passive at max level');
+                    const targetLevel = Math.min(passiveTemplate.maxLevel, currentLevel + numValue);
+                    for (let i = currentLevel; i < targetLevel; i++) {
+                        levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+                    }
+                    player.passiveLevels[name] = targetLevel;
+                    updatePassiveSlotsUI();
+                    return `Leveled up ${passiveTemplate.name} to level ${targetLevel}.`;
+                } else {
+                    const freeSlot = player.passiveSlots.findIndex(s => !s);
+                    if (freeSlot === -1) throw new Error('Passive slots are full');
+                    player.passiveSlots[freeSlot] = name;
+                    const targetLevel = Math.min(passiveTemplate.maxLevel, numValue);
+                    for (let i = 0; i < targetLevel; i++) {
+                        levelUpController.applyStat(passiveTemplate.stat, passiveTemplate.value);
+                    }
+                    player.passiveLevels[name] = targetLevel;
+                    updatePassiveSlotsUI();
+                    return `Gave player ${passiveTemplate.name} (level ${targetLevel}).`;
+                }
+            }
+        }
+        case 'coins': {
+            if (!name) throw new Error('Usage: give coins <amount>');
+            const amount = parseInt(name, 10);
+            if (isNaN(amount)) throw new Error('Invalid amount for coins');
+            player.coins += amount;
+            return `Added ${amount} coins.`;
+        }
+        case 'xp': {
+            if (!name) throw new Error('Usage: give xp <amount>');
+            const amount = parseInt(name, 10);
+            if (isNaN(amount)) throw new Error('Invalid amount for xp');
+            player.addXP(amount);
+            return `Added ${amount} XP.`;
+        }
+        case 'stat': {
+            if (!name || value === '1') throw new Error('Usage: give stat <name> <value>');
+            const statName = Object.keys(player.stats).find(s => s.toLowerCase().replace(' ', '') === name.toLowerCase());
+            if (!statName) throw new Error(`Stat '${name}' not found`);
+            const numValue = parseInt(value, 10);
+            if (isNaN(numValue)) throw new Error('Invalid value for stat');
+            player.stats[statName] += numValue;
+            if (statName === "Max Health") player.maxhp = player.stats[statName];
+            return `Increased ${statName} by ${numValue}.`;
+        }
+        case 'pick_up': {
+            if (!name) throw new Error('Usage: give pick_up <name>');
+            const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+            if (!pickupTypes.includes(name)) throw new Error(`Invalid pickup name: ${name}`);
+            const p = new Pickup();
+            p.spawn(player.x, player.y, name);
+            p.collect();
+            return `Collected pickup: ${name}`;
+        }
+        default:
+            throw new Error(`Invalid type '${type}'.`);
+    }
+}, 'Gives the player items, currency, or stats.', (args) => {
+    const [type, name] = args;
+    if (args.length <= 1) {
+        return ['item', 'coins', 'xp', 'stat', 'pick_up'].filter(s => s.startsWith(type || ''));
+    }
+    if (type === 'item' && args.length <= 2) {
+        const allItems = { ...weaponsCatalog, ...passiveMap };
+        return Object.values(allItems).map(i => i.id).filter(id => !id.includes("holy_wand") && id.startsWith(name || ''));
+    }
+    if (type === 'stat' && args.length <= 2) {
+        return Object.keys(player.stats).map(s => s.replace(' ', '')).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+    }
+    if (type === 'pick_up' && args.length <= 2) {
+        const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+        return pickupTypes.filter(n => n.startsWith(name || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('set', (args) => {
+    const [type, name, value] = args;
+    if (!type || !name || value === undefined) throw new Error('Usage: set <type> <name> <value>');
+
+    switch (type) {
+        case 'time': {
+            const minutes = parseInt(name, 10);
+            const seconds = value ? parseInt(value, 10) : 0;
+            if (isNaN(minutes) || isNaN(seconds)) throw new Error('Usage: set time <minutes> [seconds]');
+            gameTime = minutes * 60 + seconds;
+            return `Game time set to ${minutes}m ${seconds}s.`;
+        }
+        case 'stat': {
+            const numValue = parseInt(value, 10);
+            if (isNaN(numValue)) throw new Error('Invalid value for stat');
+            const statName = Object.keys(player.stats).find(s => s.toLowerCase().replace(/ /g, '') === name.toLowerCase());
+            if (!statName) throw new Error(`Stat '${name}' not found`);
+            player.stats[statName] = numValue;
+            if (statName === "Max Health") player.maxhp = player.stats[statName];
+            return `Set ${statName} to ${numValue}.`;
+        }
+        default:
+            throw new Error(`Invalid type '${type}'.`);
+    }
+}, 'Sets a game value or player stat.', (args) => {
+    const [type, name] = args;
+    if (args.length <= 1) {
+        return ['time', 'stat'].filter(s => s.startsWith(type || ''));
+    }
+     if (type === 'stat' && args.length <= 2) {
+        return Object.keys(player.stats).map(s => s.replace(/ /g, '')).filter(s => s.toLowerCase().startsWith(name.toLowerCase() || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('spawn', (args) => {
+    const [itemName, amount = '1'] = args;
+    if (!itemName) throw new Error('Usage: spawn <itemName> [amount]');
+
+    const numAmount = parseInt(amount, 10);
+    if (isNaN(numAmount) || numAmount < 1) throw new Error('INVALID_AMOUNT');
+
+    const isEnemy = !!EnemyTypes[itemName];
+    const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+    const isPickup = pickupTypes.includes(itemName);
+
+    if (!isEnemy && !isPickup) throw new Error(`Item '${itemName}' not found for spawning.`);
+
+    if (isEnemy) {
+        for (let i = 0; i < numAmount; i++) {
+            const e = enemies.spawn();
+            e.init(itemName);
+            e.spawn(player.x, player.y);
+        }
+    } else { // isPickup
+        for (let i = 0; i < numAmount; i++) {
+            const p = pickups.spawn();
+            p.spawn(player.x, player.y, itemName);
+        }
+    }
+    return `Spawned ${numAmount} ${itemName}(s).`;
+}, 'Spawns enemies or pickups near the player.', (args) => {
+    const [itemName] = args;
+    if (args.length <= 1) {
+        const enemyNames = Object.keys(EnemyTypes);
+        const pickupTypes = ['coin', 'coin_bag', 'chest', 'magnet', 'floor_chicken', 'flame_breath', 'sun', 'clock', 'clover'];
+        return [...enemyNames, ...pickupTypes].filter(name => name.startsWith(itemName || ''));
+    }
+    return [];
+});
+
+consoleManager.registerCommand('help', (args) => {
+    if (args[0]) {
+        const cmd = consoleManager.commands[args[0]];
+        if (cmd) return `${args[0]}: ${cmd.description}`;
+        throw new Error('COMMAND_NOT_FOUND');
+    }
+    return 'Available commands: ' + Object.keys(consoleManager.commands).join(', ');
+}, 'Shows a list of commands or help for a specific command.');
+
+consoleManager.registerCommand('clear', () => {
+    consoleManager.outputEl.innerHTML = '';
+    return 'Console cleared.';
+}, 'Clears the console output.');
+
+consoleManager.registerCommand('heal', () => {
+    player.hp = player.maxhp;
+    return 'Player healed to full health.';
+}, 'Heals the player to their maximum health.');
+
+consoleManager.registerCommand('god', (args) => {
+    const [state] = args;
+    if (state === 'on') {
+        player.godMode = true;
+    } else if (state === 'off') {
+        player.godMode = false;
+    } else {
+        player.godMode = !player.godMode;
+    }
+    return `God mode ${player.godMode ? 'enabled' : 'disabled'}.`;
+}, 'Toggles god mode, making the player invincible. Usage: god [on|off]');
  
 </script> 
 </body> 
